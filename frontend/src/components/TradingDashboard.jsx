@@ -40,6 +40,7 @@ import VisualizeModal from './VisualizeModal';
 import Gann3DPanel from './Gann3DPanel';
 import VoiceCommandSystem from './VoiceCommandSystem';
 import OrderFlowPanel from './OrderFlowPanel';
+import KronosForecastPanel from './KronosForecastPanel';
 import GrowwPortfolio from './GrowwPortfolio';
 import IndicesTickerBar from './IndicesTickerBar';
 import TopOptionsSheet from './TopOptionsSheet';
@@ -646,9 +647,9 @@ const TradingDashboard = () => {
         </aside>
 
         {/* Center Chart */}
-        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-hidden ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
-          {/* Chart — flex-1 fills space above OrderFlow, minHeight ensures chart init works */}
-          <div className="flex-1 min-h-0" style={{ minHeight: '200px' }}>
+        <main className={`flex-1 lg:col-span-6 xl:col-span-7 flex flex-col relative min-h-0 overflow-y-auto overflow-x-hidden ${mobilePanel !== 'chart' ? 'hidden lg:flex' : 'flex'}`} data-testid="center-chart">
+          {/* Chart — fixed height inside scrollable column so chart canvas always has room */}
+          <div className="shrink-0" style={{ height: 'min(60vh, 560px)', minHeight: '320px' }}>
             <ChartPanel
               stockData={stockData}
               loading={loading}
@@ -676,6 +677,8 @@ const TradingDashboard = () => {
           {stockData?.bars?.length >= 30 && (
             <OrderFlowPanel stockData={stockData} selectedStock={selectedStock} />
           )}
+          {/* Kronos AI Forecast — below Order Flow */}
+          <KronosForecastPanel selectedStock={selectedStock} timeframe={timeframe} />
         </main>
 
         {/* Right Sidebar */}

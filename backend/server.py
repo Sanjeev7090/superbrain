@@ -11166,6 +11166,10 @@ async def get_options_network(symbol: str):
 from rl_agent.rl_router import rl_router
 app.include_router(rl_router)
 
+# ======================= KRONOS FORECAST =======================
+from kronos_router import kronos_router
+app.include_router(kronos_router)
+
 # ======================= MULTI-AI ENSEMBLE =======================
 from ensemble.router import ensemble_router
 app.include_router(ensemble_router)
