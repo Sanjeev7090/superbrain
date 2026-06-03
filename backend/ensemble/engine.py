@@ -34,6 +34,61 @@ DEFAULT_ENSEMBLE: List[Tuple[str, str, str, float]] = [
     ("openai",    "gpt-5.2",                   "GPT-5.2",            1.10),
 ]
 
+# ---------------------------------------------------------------------------
+# All 45 models for full analysis (sourced from OpenCode Free / 9router)
+# ---------------------------------------------------------------------------
+ALL_45_MODELS: List[Dict] = [
+    # Claude family — verified working via Emergent key
+    {"id": "claude-opus-4-8",          "display": "Claude Opus 4.8",       "provider": "anthropic", "family": "claude"},
+    {"id": "claude-opus-4-7",          "display": "Claude Opus 4.7",       "provider": "anthropic", "family": "claude"},
+    {"id": "claude-opus-4-6",          "display": "Claude Opus 4.6",       "provider": "anthropic", "family": "claude"},
+    {"id": "claude-opus-4-5",          "display": "Claude Opus 4.5",       "provider": "opencode",  "family": "claude"},
+    {"id": "claude-opus-4-1",          "display": "Claude Opus 4.1",       "provider": "opencode",  "family": "claude"},
+    {"id": "claude-sonnet-4-6",        "display": "Claude Sonnet 4.6",     "provider": "anthropic", "family": "claude"},
+    {"id": "claude-sonnet-4-5",        "display": "Claude Sonnet 4.5",     "provider": "anthropic", "family": "claude"},
+    {"id": "claude-sonnet-4",          "display": "Claude Sonnet 4",       "provider": "opencode",  "family": "claude"},
+    {"id": "claude-haiku-4-5",         "display": "Claude Haiku 4.5",      "provider": "anthropic", "family": "claude"},
+    # Gemini family — OpenCode naming (gemini-3.x), need 9router
+    {"id": "gemini-3.5-flash",         "display": "Gemini 3.5 Flash",      "provider": "opencode",  "family": "gemini"},
+    {"id": "gemini-3.1-pro",           "display": "Gemini 3.1 Pro",        "provider": "opencode",  "family": "gemini"},
+    {"id": "gemini-3-flash",           "display": "Gemini 3 Flash",        "provider": "opencode",  "family": "gemini"},
+    # GPT family — verified working via Emergent key
+    {"id": "gpt-5.5",                  "display": "GPT 5.5",               "provider": "openai",    "family": "gpt"},
+    {"id": "gpt-5.5-pro",              "display": "GPT 5.5 Pro",           "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.4",                  "display": "GPT 5.4",               "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.4-pro",              "display": "GPT 5.4 Pro",           "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.4-mini",             "display": "GPT 5.4 Mini",          "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.4-nano",             "display": "GPT 5.4 Nano",          "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.3-codex-spark",      "display": "GPT 5.3 Codex Spark",  "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.3-codex",            "display": "GPT 5.3 Codex",        "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.2",                  "display": "GPT 5.2",               "provider": "openai",    "family": "gpt"},
+    {"id": "gpt-5.2-codex",            "display": "GPT 5.2 Codex",        "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.1",                  "display": "GPT 5.1",               "provider": "openai",    "family": "gpt"},
+    {"id": "gpt-5.1-codex-max",        "display": "GPT 5.1 Codex Max",    "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.1-codex",            "display": "GPT 5.1 Codex",        "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5.1-codex-mini",       "display": "GPT 5.1 Codex Mini",   "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5",                    "display": "GPT 5",                 "provider": "openai",    "family": "gpt"},
+    {"id": "gpt-5-codex",              "display": "GPT 5 Codex",          "provider": "opencode",  "family": "gpt"},
+    {"id": "gpt-5-nano",               "display": "GPT 5 Nano",           "provider": "opencode",  "family": "gpt"},
+    # Others (need OpenCode / 9router)
+    {"id": "grok-build-0.1",           "display": "Grok Build 0.1",        "provider": "opencode",  "family": "grok"},
+    {"id": "deepseek-v4-flash",        "display": "DeepSeek V4 Flash",     "provider": "opencode",  "family": "deepseek"},
+    {"id": "deepseek-v4-flash-free",   "display": "DeepSeek V4 Free",      "provider": "opencode",  "family": "deepseek"},
+    {"id": "glm-5.1",                  "display": "GLM 5.1",               "provider": "opencode",  "family": "glm"},
+    {"id": "glm-5",                    "display": "GLM 5",                 "provider": "opencode",  "family": "glm"},
+    {"id": "minimax-m2.7",             "display": "MiniMax M2.7",          "provider": "opencode",  "family": "minimax"},
+    {"id": "minimax-m2.5",             "display": "MiniMax M2.5",          "provider": "opencode",  "family": "minimax"},
+    {"id": "minimax-m3-free",          "display": "MiniMax M3 Free",       "provider": "opencode",  "family": "minimax"},
+    {"id": "kimi-k2.6",                "display": "Kimi K2.6",             "provider": "opencode",  "family": "kimi"},
+    {"id": "kimi-k2.5",                "display": "Kimi K2.5",             "provider": "opencode",  "family": "kimi"},
+    {"id": "qwen3.6-plus",             "display": "Qwen 3.6 Plus",         "provider": "opencode",  "family": "qwen"},
+    {"id": "qwen3.5-plus",             "display": "Qwen 3.5 Plus",         "provider": "opencode",  "family": "qwen"},
+    {"id": "qwen3.6-plus-free",        "display": "Qwen 3.6 Free",         "provider": "opencode",  "family": "qwen"},
+    {"id": "big-pickle",               "display": "Big Pickle",            "provider": "opencode",  "family": "other"},
+    {"id": "mimo-v2.5-free",           "display": "Mimo V2.5 Free",        "provider": "opencode",  "family": "other"},
+    {"id": "nemotron-3-super-free",    "display": "Nemotron 3 Super",      "provider": "opencode",  "family": "other"},
+]
+
 SIGNAL_TOKENS = ("BUY", "SELL", "HOLD", "ABSTAIN")
 
 
@@ -96,11 +151,60 @@ async def _ask_via_ai_router(
     display_name: str,
     system_message: str,
     user_text: str,
-    timeout: float = 45.0,
+    timeout: float = 15.0,
+    skip_emergent: bool = False,
 ) -> Dict:
-    """Call via the local AI Router (OpenCode Free / configured providers)."""
+    """
+    Call via OpenCode Free endpoint directly (fast fail if not configured).
+    When skip_emergent=True (used for full-analysis OpenCode models), bypass
+    the Emergent provider to avoid 18s timeout per model.
+    """
     import time
+    import httpx as _httpx
     start = time.time()
+
+    if skip_emergent:
+        # Direct OpenCode Free call — fast 401 if no auth
+        try:
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": user_text},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1024,
+            }
+            async with _httpx.AsyncClient(timeout=timeout) as c:
+                r = await c.post(
+                    "https://opencode.ai/zen/v1/chat/completions",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                if r.status_code == 401:
+                    return {"model": display_name, "provider": "opencode", "ok": False,
+                            "raw": "", "parsed": None,
+                            "error": "401 — Setup 9router (npx 9router) to use this model",
+                            "latency_ms": int((time.time() - start) * 1000)}
+                r.raise_for_status()
+                data = r.json()
+                content = data["choices"][0]["message"]["content"] or ""
+                latency = int((time.time() - start) * 1000)
+                return {
+                    "model": display_name, "provider": "opencode",
+                    "ok": True, "raw": content, "parsed": _extract_json(content),
+                    "error": None, "latency_ms": latency,
+                }
+        except _httpx.HTTPStatusError as e:
+            return {"model": display_name, "provider": "opencode", "ok": False,
+                    "raw": "", "parsed": None, "error": f"HTTP {e.response.status_code}",
+                    "latency_ms": int((time.time() - start) * 1000)}
+        except Exception as e:
+            return {"model": display_name, "provider": "opencode", "ok": False,
+                    "raw": "", "parsed": None, "error": str(e)[:200],
+                    "latency_ms": int((time.time() - start) * 1000)}
+
+    # Default: use full AI Router chain (Emergent + fallback)
     try:
         from ai_router.engine import ai_complete
         resp = await asyncio.wait_for(
@@ -141,24 +245,33 @@ async def _ask_one_model(
     user_text: str,
     timeout: float = 30.0,
 ) -> Dict:
-    """Call one LLM. Returns dict {model, ok, raw, parsed, error, latency_ms}."""
+    """Call one LLM in a separate thread (avoids event-loop blocking)."""
     import time
     start = time.time()
 
-    # Prefer AI Router when no Emergent key configured
     emergent_key = os.environ.get("EMERGENT_LLM_KEY", "").strip()
     if not emergent_key:
         return await _ask_via_ai_router(model, display_name, system_message, user_text, timeout)
 
-    try:
-        chat = LlmChat(
-            api_key=_get_api_key(),
-            session_id=f"ensemble-{uuid.uuid4().hex[:8]}",
-            system_message=system_message,
-        ).with_model(provider, model)
+    def _sync_call() -> str:
+        """Run LlmChat synchronously in a thread."""
+        import asyncio as _aio
+        loop = _aio.new_event_loop()
+        try:
+            chat = LlmChat(
+                api_key=emergent_key,
+                session_id=f"ensemble-{uuid.uuid4().hex[:8]}",
+                system_message=system_message,
+            ).with_model(provider, model)
+            return loop.run_until_complete(chat.send_message(UserMessage(text=user_text)))
+        finally:
+            loop.close()
 
-        msg = UserMessage(text=user_text)
-        resp = await asyncio.wait_for(chat.send_message(msg), timeout=timeout)
+    try:
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(_sync_call),
+            timeout=timeout,
+        )
         latency = int((time.time() - start) * 1000)
         return {
             "model":    display_name,
@@ -175,7 +288,6 @@ async def _ask_one_model(
                 "latency_ms": int((time.time() - start) * 1000)}
     except Exception as exc:
         logger.warning("Ensemble model %s failed: %s — trying AI Router", display_name, exc)
-        # Fallback to AI Router
         return await _ask_via_ai_router(model, display_name, system_message, user_text, timeout)
 
 
@@ -306,7 +418,54 @@ async def ask_ensemble(user_text: str, system_message: str = ENSEMBLE_SYSTEM_PRO
     return verdict
 
 
-def get_status() -> Dict:
+async def ask_all_models(user_text: str, system_message: str = ENSEMBLE_SYSTEM_PROMPT, concurrency: int = 8) -> List[Dict]:
+    """
+    Call ALL 45 models in parallel batches.
+    Returns list of result dicts (one per model, same format as _ask_one_model).
+    Models are ordered as in ALL_45_MODELS.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    # Claude opus mapping (OpenCode uses short names, Emergent needs full names)
+    CLAUDE_MAP = {
+        "claude-opus-4-8": "claude-opus-4-8",
+        "claude-opus-4-7": "claude-opus-4-7",
+        "claude-opus-4-6": "claude-opus-4-6",
+        "claude-opus-4-5": "claude-opus-4-5",
+        "claude-opus-4-1": "claude-opus-4-1",
+        "claude-sonnet-4-6": "claude-sonnet-4-6",
+        "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+        "claude-sonnet-4":   "claude-sonnet-4",
+        "claude-haiku-4-5":  "claude-haiku-4-5",
+    }
+
+    async def _call_one(meta: Dict) -> Dict:
+        async with semaphore:
+            model_id   = meta["id"]
+            display    = meta["display"]
+            family     = meta["family"]
+            oc_family  = meta["provider"] == "opencode"
+
+            # For OpenCode-native models, go straight to OpenCode (fast fail if not configured)
+            if oc_family:
+                return await _ask_via_ai_router(model_id, display, system_message, user_text, timeout=10.0, skip_emergent=True)
+
+            # Remap Claude model IDs for Emergent
+            ei_prov  = meta["provider"]
+            em_model = CLAUDE_MAP.get(model_id, model_id)
+
+            return await _ask_one_model(ei_prov, em_model, display, system_message, user_text, timeout=18.0)
+
+    tasks = [_call_one(m) for m in ALL_45_MODELS]
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Attach meta fields (family, num) to results
+    for i, (meta, res) in enumerate(zip(ALL_45_MODELS, results)):
+        res["num"]    = i + 1
+        res["family"] = meta["family"]
+        res["model"]  = meta["display"]   # ensure display name used
+
+    return list(results)
     """Return current ensemble config (for UI / health checks)."""
     return {
         "provider_mode":  os.environ.get("LLM_PROVIDER_MODE", "emergent"),

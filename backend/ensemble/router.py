@@ -153,6 +153,97 @@ async def signal(req: SignalRequest):
     }
 
 
+@ensemble_router.post("/full-analysis")
+async def full_analysis(req: SignalRequest):
+    """
+    Call ALL 45 models (Claude, GPT, Gemini, DeepSeek, GLM, Minimax, Kimi, Qwen...)
+    in parallel and return numbered BUY/SELL/SL/Target results.
+    OpenCode/9router models need 9router running at localhost:20128.
+    """
+    context = req.context
+    if not context:
+        df = gann_optimizer._fetch_recent_bars(req.ticker)
+        if df is None or len(df) < 20:
+            return {"success": False, "error": f"Could not fetch data for {req.ticker}"}
+        context = gann_optimizer._market_context(df)
+
+    prompt = {
+        "ticker": req.ticker,
+        "snapshot": context,
+        "task": (
+            "Output STRICT JSON with: signal (BUY/SELL/HOLD), confidence (0-100), "
+            "entry_price, stop_loss, target_1, target_2, target_3, rationale."
+        ),
+    }
+
+    all_results = await ensemble_engine.ask_all_models(json.dumps(prompt, indent=2))
+
+    # Enrich each result with signal/confidence from parsed JSON
+    enriched = []
+    for r in all_results:
+        parsed = r.get("parsed") or {}
+        levels = _extract_levels(parsed, context)
+        enriched.append({
+            **r,
+            "signal":     parsed.get("signal") or r.get("signal") or "HOLD",
+            "confidence": parsed.get("confidence") or r.get("confidence") or 0,
+            "rationale":  parsed.get("rationale") or r.get("rationale") or "",
+            **levels,
+        })
+
+    # Add Kronos as model #46
+    try:
+        from kronos_router import get_kronos_signal
+        kronos_raw = await get_kronos_signal(req.ticker)
+        if kronos_raw:
+            sig = kronos_raw["signal"]
+            if sig == "WAIT":
+                sig = "HOLD"
+            enriched.append({
+                "num":         len(enriched) + 1,
+                "model":       "Kronos AI",
+                "family":      "kronos",
+                "provider":    "kronos",
+                "ok":          True,
+                "signal":      sig,
+                "confidence":  kronos_raw["confidence"],
+                "rationale":   kronos_raw["rationale"],
+                "entry_price": kronos_raw.get("entry_price"),
+                "stop_loss":   kronos_raw.get("stop_loss"),
+                "target_1":    kronos_raw.get("target_1"),
+                "target_2":    kronos_raw.get("target_2"),
+                "target_3":    kronos_raw.get("target_3"),
+                "weight":      1.0,
+            })
+    except Exception as e:
+        logger.warning("Kronos skipped in full-analysis: %s", e)
+
+    # Build quick consensus from successful votes
+    ok_results = [r for r in enriched if r.get("ok") and r.get("signal") in ("BUY", "SELL", "HOLD")]
+    counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
+    for r in ok_results:
+        counts[r["signal"]] = counts.get(r["signal"], 0) + 1
+    consensus = max(counts, key=counts.get) if ok_results else "HOLD"
+    avg_conf = int(sum(r.get("confidence", 0) for r in ok_results) / len(ok_results)) if ok_results else 0
+
+    return {
+        "success":       True,
+        "ticker":        req.ticker,
+        "models":        enriched,
+        "total":         len(enriched),
+        "successful":    len(ok_results),
+        "consensus":     consensus,
+        "avg_confidence": avg_conf,
+        "vote_counts":   counts,
+    }
+
+
+@ensemble_router.get("/full-analysis/models")
+async def full_analysis_models():
+    """Return list of all 45 models that full-analysis will call."""
+    return {"models": ensemble_engine.ALL_45_MODELS, "count": len(ensemble_engine.ALL_45_MODELS)}
+
+
 @ensemble_router.post("/gann-optimize")
 async def gann_optimize(req: GannRequest):
     """AI-driven Gann + Square-of-9 optimisation."""

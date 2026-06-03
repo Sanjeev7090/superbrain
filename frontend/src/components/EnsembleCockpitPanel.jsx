@@ -1,147 +1,199 @@
-import React, { useState, useEffect } from 'react';
-import { Brain, Target, Lightning, Robot, Check, X, ArrowsClockwise, Sparkle } from '@phosphor-icons/react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api/ensemble`;
 
-// ─── Color helpers ───────────────────────────────────────────────────────────
-const SIG = {
-  BUY:     { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-400', dot: 'bg-emerald-400' },
-  SELL:    { bg: 'bg-rose-500/15',    border: 'border-rose-500/40',    text: 'text-rose-400',    dot: 'bg-rose-400'    },
-  HOLD:    { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
-  WAIT:    { bg: 'bg-amber-500/15',   border: 'border-amber-500/40',   text: 'text-amber-400',   dot: 'bg-amber-400'   },
-  ABSTAIN: { bg: 'bg-zinc-800/60',    border: 'border-zinc-700',       text: 'text-zinc-400',    dot: 'bg-zinc-500'    },
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const SIG_STYLE = {
+  BUY:     { bg: '#00E676', text: '#000', glow: '0 0 10px #00E67688' },
+  SELL:    { bg: '#FF3B30', text: '#fff', glow: '0 0 10px #FF3B3088' },
+  HOLD:    { bg: '#F5A623', text: '#000', glow: '0 0 8px #F5A62366'  },
+  WAIT:    { bg: '#F5A623', text: '#000', glow: '0 0 8px #F5A62366'  },
 };
-const sigStyle = (s) => SIG[s] || SIG.ABSTAIN;
+const sigStyle = (s) => SIG_STYLE[s?.toUpperCase()] || { bg: '#3F3F46', text: '#A1A1AA', glow: 'none' };
 
-const MODEL_META = {
-  'Claude Sonnet 4.5': { accent: '#FF6B35', short: 'Claude' },
-  'Gemini 3 Pro':      { accent: '#4285F4', short: 'Gemini' },
-  'GPT-5.2':           { accent: '#74AA9C', short: 'GPT'    },
-  'Kronos AI':         { accent: '#A855F7', short: 'Kronos' },
+const FAMILY_COLORS = {
+  claude:   '#FF6B35',
+  gemini:   '#4285F4',
+  gpt:      '#74AA9C',
+  grok:     '#A855F7',
+  deepseek: '#06B6D4',
+  glm:      '#F59E0B',
+  minimax:  '#EC4899',
+  kimi:     '#3B82F6',
+  qwen:     '#84CC16',
+  kronos:   '#A855F7',
+  other:    '#71717A',
 };
-const modelAccent = (name) => (MODEL_META[name] || { accent: '#A1A1AA' }).accent;
+const familyColor = (f) => FAMILY_COLORS[f] || FAMILY_COLORS.other;
+const fmt = (v) => (v != null && !isNaN(+v) ? `₹${(+v).toFixed(1)}` : '—');
 
-const fmt = (v) => (v != null && !isNaN(Number(v)) ? `₹${Number(v).toFixed(2)}` : '—');
-
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function ConfBar({ value, color = '#00E676' }) {
+// ─── Mini confidence bar ─────────────────────────────────────────────────────
+function ConfBar({ value, color }) {
   const v = Math.max(0, Math.min(100, value || 0));
   return (
-    <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden">
-      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${v}%`, background: color }} />
+    <div className="w-full bg-zinc-800/80 rounded-full h-0.5">
+      <div className="h-full rounded-full" style={{ width: `${v}%`, background: color, transition: 'width 0.6s' }} />
     </div>
   );
 }
 
-function ModelCard({ num, vote }) {
-  const sig = (vote.signal || 'HOLD').toUpperCase();
-  const s   = sigStyle(sig);
-  const acc = modelAccent(vote.model);
-  const ok  = vote.ok !== false;
+// ─── Compact row card (for numbered list) ────────────────────────────────────
+function ModelRow({ result }) {
+  const [expanded, setExpanded] = useState(false);
+  const sig = (result.signal || 'HOLD').toUpperCase();
+  const ss  = sigStyle(sig);
+  const fc  = familyColor(result.family);
+  const ok  = result.ok !== false;
 
   return (
     <div
-      className="border border-zinc-800 bg-[#0E0E10] rounded-lg overflow-hidden"
-      style={{ borderLeftColor: acc, borderLeftWidth: 2 }}
-      data-testid={`model-card-${num}`}
+      className="border-b border-zinc-800/60 hover:bg-zinc-900/60 transition-colors cursor-pointer"
+      onClick={() => ok && setExpanded(e => !e)}
+      data-testid={`model-row-${result.num}`}
     >
-      {/* Header row */}
-      <div className="flex items-center gap-2.5 px-3 py-2 border-b border-zinc-800/80">
-        {/* Number badge */}
-        <div
-          className="w-5 h-5 rounded-sm flex items-center justify-center text-[10px] font-black flex-shrink-0"
-          style={{ background: `${acc}22`, color: acc, border: `1px solid ${acc}44` }}
+      {/* Main row */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        {/* Number */}
+        <span
+          className="text-[9px] font-black w-5 text-right flex-shrink-0 font-mono"
+          style={{ color: fc }}
         >
-          {num}
-        </div>
-        <span className="text-[11px] font-bold text-zinc-200 flex-1 truncate">{vote.model}</span>
+          {result.num}
+        </span>
+
+        {/* Family indicator */}
+        <span className="w-1 h-3 rounded-full flex-shrink-0" style={{ background: fc }} />
+
+        {/* Model name */}
+        <span className="text-[10px] text-zinc-300 flex-1 truncate font-medium">{result.model}</span>
+
+        {/* Signal badge or status */}
         {ok ? (
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-sm border text-[10px] font-black tracking-wider ${s.bg} ${s.border} ${s.text}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-            {sig}
-          </div>
+          <>
+            <span
+              className="text-[8px] font-black px-1.5 py-0.5 rounded-sm flex-shrink-0"
+              style={{ background: ss.bg + '22', color: ss.bg, border: `1px solid ${ss.bg}44` }}
+            >
+              {sig}
+            </span>
+            <span className="text-[9px] font-mono text-zinc-500 w-8 text-right flex-shrink-0">
+              {result.confidence || 0}%
+            </span>
+            <span className="text-[9px] font-mono text-zinc-400 w-16 text-right truncate flex-shrink-0">
+              {fmt(result.entry_price)}
+            </span>
+            <span className="text-[9px] font-mono text-rose-400 w-16 text-right truncate flex-shrink-0">
+              {fmt(result.stop_loss)}
+            </span>
+            <span className="text-[9px] font-mono text-emerald-400 w-16 text-right truncate flex-shrink-0">
+              {fmt(result.target_1)}
+            </span>
+          </>
         ) : (
-          <span className="text-[9px] text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-sm">FAILED</span>
+          <span className="text-[9px] text-zinc-600 flex-shrink-0">
+            {result.error?.includes('401') || result.error?.includes('auth')
+              ? '⚙ Setup 9router'
+              : result.error?.includes('timeout')
+              ? '⏱ Timeout'
+              : '✕ Failed'}
+          </span>
         )}
       </div>
 
-      {ok ? (
-        <div className="px-3 py-2 space-y-2">
+      {/* Expanded detail */}
+      {expanded && ok && (
+        <div className="px-3 pb-2 pt-0.5 bg-zinc-900/40 space-y-1.5">
           {/* Price grid */}
-          <div className="grid grid-cols-5 gap-1 text-center">
+          <div className="grid grid-cols-5 gap-1 text-center text-[9px]">
             {[
-              { label: 'ENTRY',  val: vote.entry_price, color: '#A1A1AA' },
-              { label: 'SL',     val: vote.stop_loss,   color: '#FF3B30' },
-              { label: 'T1',     val: vote.target_1,    color: '#00E676' },
-              { label: 'T2',     val: vote.target_2,    color: '#00C853' },
-              { label: 'T3',     val: vote.target_3,    color: '#69F0AE' },
+              { label: 'ENTRY', val: result.entry_price, color: '#A1A1AA' },
+              { label: 'SL',    val: result.stop_loss,   color: '#FF3B30' },
+              { label: 'T1',    val: result.target_1,    color: '#00E676' },
+              { label: 'T2',    val: result.target_2,    color: '#00C853' },
+              { label: 'T3',    val: result.target_3,    color: '#69F0AE' },
             ].map(({ label, val, color }) => (
-              <div key={label} className="bg-white/3 rounded px-1 py-1">
-                <div className="text-[7px] font-bold uppercase tracking-widest" style={{ color }}>{label}</div>
-                <div className="text-[9px] font-mono font-bold text-zinc-200 mt-0.5 leading-tight">{fmt(val)}</div>
+              <div key={label} className="bg-black/30 rounded px-1 py-1">
+                <div className="text-[7px] uppercase tracking-widest" style={{ color }}>{label}</div>
+                <div className="font-mono font-bold text-zinc-200 mt-0.5">{fmt(val)}</div>
               </div>
             ))}
           </div>
-
-          {/* Confidence */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[9px]">
-              <span className="text-zinc-600">Confidence</span>
-              <span className="font-mono text-zinc-300">{vote.confidence}%</span>
-            </div>
-            <ConfBar value={vote.confidence} color={acc} />
-          </div>
-
-          {/* Rationale */}
-          {vote.rationale && (
-            <p className="text-[9px] text-zinc-500 leading-relaxed line-clamp-2">{vote.rationale}</p>
+          <ConfBar value={result.confidence} color={fc} />
+          {result.rationale && (
+            <p className="text-[9px] text-zinc-500 leading-relaxed line-clamp-2">{result.rationale}</p>
           )}
-        </div>
-      ) : (
-        <div className="px-3 py-2 text-[10px] text-rose-400 flex items-center gap-1.5">
-          <X size={12} /> {vote.rationale || vote.error || 'Model did not respond'}
         </div>
       )}
     </div>
   );
 }
 
-function ConsensusRow({ verdict }) {
-  if (!verdict) return null;
-  const sig = verdict.consensus || 'ABSTAIN';
-  const s = sigStyle(sig);
+// ─── Consensus bar ───────────────────────────────────────────────────────────
+function ConsensusStrip({ counts, total, avgConf, consensus }) {
+  if (!counts) return null;
+  const buy  = counts.BUY  || 0;
+  const sell = counts.SELL || 0;
+  const hold = counts.HOLD || 0;
+  const ss   = sigStyle(consensus);
   return (
-    <div
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${s.bg} ${s.border}`}
-      data-testid="ensemble-consensus"
-    >
-      <div className={`text-base font-black tracking-widest ${s.text}`} data-testid="consensus-signal">
-        {sig}
-      </div>
-      <div className="flex-1">
-        <div className="flex justify-between text-[9px] mb-1">
-          <span className="text-zinc-500">Ensemble Confidence</span>
-          <span className="font-mono text-zinc-200" data-testid="consensus-confidence">{verdict.confidence}%</span>
+    <div className="px-3 py-2.5 bg-[#0E0E10] border-b border-zinc-800/60">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2">
+          <span
+            className="text-xs font-black px-2 py-0.5 rounded-sm"
+            style={{ background: ss.bg, color: ss.text, boxShadow: ss.glow }}
+            data-testid="consensus-signal"
+          >
+            {consensus}
+          </span>
+          <span className="text-[9px] text-zinc-400">Ensemble Consensus</span>
         </div>
-        <ConfBar value={verdict.confidence} color={s.dot.replace('bg-', '#').replace('-400', '')} />
+        <span className="text-[9px] font-mono text-zinc-400" data-testid="consensus-confidence">
+          Avg {avgConf}% confidence
+        </span>
       </div>
-      <div className="text-[9px] text-zinc-500">
-        {verdict.valid_voters}/{verdict.total_voters} voted
+      {/* Vote bar */}
+      <div className="flex rounded-sm overflow-hidden h-2" style={{ gap: 1 }}>
+        {buy  > 0 && <div style={{ flex: buy,  background: '#00E676' }} title={`BUY: ${buy}`} />}
+        {hold > 0 && <div style={{ flex: hold, background: '#F5A623' }} title={`HOLD: ${hold}`} />}
+        {sell > 0 && <div style={{ flex: sell, background: '#FF3B30' }} title={`SELL: ${sell}`} />}
+      </div>
+      <div className="flex justify-between mt-1 text-[8px] font-mono">
+        <span className="text-[#00E676]">BUY {buy}</span>
+        <span className="text-[#F5A623]">HOLD {hold}</span>
+        <span className="text-[#FF3B30]">SELL {sell}</span>
+        <span className="text-zinc-600">{buy + sell + hold}/{total} responded</span>
       </div>
     </div>
   );
 }
 
-// ─── Main panel ──────────────────────────────────────────────────────────────
+// ─── Loading progress ────────────────────────────────────────────────────────
+function LoadingBar({ label }) {
+  const [dots, setDots] = useState('');
+  useEffect(() => {
+    const t = setInterval(() => setDots(d => d.length < 3 ? d + '.' : ''), 400);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="flex flex-col items-center justify-center py-12 gap-3">
+      <div className="w-8 h-8 border-2 border-fuchsia-500/40 border-t-fuchsia-400 rounded-full animate-spin" />
+      <div className="text-[10px] text-zinc-400">{label}{dots}</div>
+      <div className="text-[9px] text-zinc-600">Calling 45 models in parallel — takes ~30-45s</div>
+    </div>
+  );
+}
 
+// ─── Main panel ──────────────────────────────────────────────────────────────
 export default function EnsembleCockpitPanel({ selectedStock }) {
   const [status, setStatus]           = useState(null);
   const [busy, setBusy]               = useState(false);
   const [activeTask, setActiveTask]   = useState(null);
   const [signalResult, setSignalResult] = useState(null);
+  const [fullResult, setFullResult]   = useState(null);
   const [gannResult, setGannResult]   = useState(null);
   const [error, setError]             = useState(null);
+  const [mode, setMode]               = useState('standard'); // 'standard' | 'full'
 
   useEffect(() => {
     fetch(`${API}/status`).then(r => r.json()).then(setStatus).catch(() => {});
@@ -150,9 +202,9 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
   const ticker = selectedStock?.ticker || selectedStock?.id || 'RELIANCE.NS';
 
   const runSignal = async () => {
-    setBusy(true); setActiveTask('signal'); setError(null);
+    setBusy(true); setActiveTask('signal'); setError(null); setMode('standard');
     try {
-      const r    = await fetch(`${API}/signal`, {
+      const r = await fetch(`${API}/signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker }),
@@ -160,17 +212,29 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'failed');
       setSignalResult(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false); setActiveTask(null);
-    }
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); setActiveTask(null); }
+  };
+
+  const runFullAnalysis = async () => {
+    setBusy(true); setActiveTask('full'); setError(null); setMode('full');
+    try {
+      const r = await fetch(`${API}/full-analysis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticker }),
+      });
+      const data = await r.json();
+      if (!data.success) throw new Error(data.error || 'failed');
+      setFullResult(data);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); setActiveTask(null); }
   };
 
   const runGann = async () => {
     setBusy(true); setActiveTask('gann'); setError(null);
     try {
-      const r    = await fetch(`${API}/gann-optimize`, {
+      const r = await fetch(`${API}/gann-optimize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticker }),
@@ -178,106 +242,164 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
       const data = await r.json();
       if (!data.success) throw new Error(data.error || 'failed');
       setGannResult(data);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false); setActiveTask(null);
-    }
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); setActiveTask(null); }
   };
 
-  const allModels = signalResult?.verdict?.per_model || [];
+  const fmt2 = (v) => (v != null && !isNaN(+v) ? `₹${(+v).toFixed(2)}` : '—');
 
   return (
-    <div className="flex flex-col bg-[#0A0A0A] text-white min-h-full" data-testid="ensemble-cockpit">
+    <div className="flex flex-col bg-[#0A0A0A] text-white h-full" data-testid="ensemble-cockpit">
+
       {/* Header */}
-      <div className="px-4 py-3 border-b border-white/8 bg-[#0E0E10]">
-        <div className="flex items-start justify-between gap-3">
+      <div className="px-3 py-2.5 border-b border-zinc-800/80 bg-[#0E0E10] flex-shrink-0">
+        <div className="flex items-center justify-between">
           <div>
-            <div className="flex items-center gap-2 text-zinc-100 font-bold text-[13px]">
-              <Brain size={18} weight="duotone" className="text-fuchsia-400" />
-              AI Ensemble Cockpit
+            <div className="text-[11px] font-black uppercase tracking-[0.15em] text-white">AI ENSEMBLE</div>
+            <div className="text-[8px] text-zinc-600 mt-0.5">
+              {status?.key_configured
+                ? <span className="text-emerald-500">● Emergent Key Active</span>
+                : <span className="text-rose-500">● No Key</span>}
+              &nbsp;·&nbsp;
+              <span className="text-zinc-500">{ticker}</span>
             </div>
-            <p className="text-[9px] text-zinc-500 mt-0.5">
-              Claude 4.5 · Gemini 3 Pro · GPT-5.2 · Kronos AI
-            </p>
           </div>
-          <div className="text-right text-[9px] text-zinc-500">
-            <div className="font-mono text-zinc-300">{ticker}</div>
-            {status && (
-              <div className="mt-0.5 flex items-center justify-end gap-1">
-                <span>Mode: {status.provider_mode}</span>
-                {status.key_configured
-                  ? <Check size={10} className="text-emerald-400" />
-                  : <X size={10} className="text-rose-400" />}
-              </div>
-            )}
+          <div className="text-right text-[8px] text-zinc-600">
+            <div>45 Models</div>
+            <div>Claude · GPT · Gemini + 30 More</div>
           </div>
         </div>
       </div>
 
       {/* Action buttons */}
-      <div className="px-3 py-2.5 grid grid-cols-2 gap-2 border-b border-white/5">
+      <div className="flex-shrink-0 px-3 py-2 grid grid-cols-3 gap-1.5 border-b border-zinc-800/60 bg-[#0C0C0C]">
         <button
           onClick={runSignal}
           disabled={busy}
-          className="flex items-center justify-center gap-1.5 py-2 px-3 border border-fuchsia-500/40 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 text-fuchsia-300 text-[10px] font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed transition-all rounded-sm"
+          className="py-1.5 text-[9px] font-black uppercase tracking-wider border border-fuchsia-500/40 text-fuchsia-300 hover:bg-fuchsia-500/10 disabled:opacity-40 transition-all rounded-sm flex items-center justify-center gap-1"
           data-testid="btn-ask-ensemble-signal"
         >
           {activeTask === 'signal'
-            ? <><ArrowsClockwise size={12} className="animate-spin" /> Asking models…</>
-            : <><Robot size={13} weight="duotone" /> Ask All Models</>}
+            ? <span className="animate-spin inline-block">↻</span>
+            : '⚡'}
+          3 Models
+        </button>
+        <button
+          onClick={runFullAnalysis}
+          disabled={busy}
+          className="py-1.5 text-[9px] font-black uppercase tracking-wider border border-[#00E676]/40 text-[#00E676] hover:bg-[#00E676]/10 disabled:opacity-40 transition-all rounded-sm flex items-center justify-center gap-1"
+          data-testid="btn-full-analysis"
+        >
+          {activeTask === 'full'
+            ? <span className="animate-spin inline-block">↻</span>
+            : '◉'}
+          All 45
         </button>
         <button
           onClick={runGann}
           disabled={busy}
-          className="flex items-center justify-center gap-1.5 py-2 px-3 border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[10px] font-bold uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed transition-all rounded-sm"
+          className="py-1.5 text-[9px] font-black uppercase tracking-wider border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/10 disabled:opacity-40 transition-all rounded-sm flex items-center justify-center gap-1"
           data-testid="btn-ai-gann-optimize"
         >
           {activeTask === 'gann'
-            ? <><ArrowsClockwise size={12} className="animate-spin" /> Optimising…</>
-            : <><Target size={13} weight="duotone" /> AI Gann + SoQ</>}
+            ? <span className="animate-spin inline-block">↻</span>
+            : '◎'}
+          Gann+SoQ
         </button>
       </div>
 
+      {/* Column headers (for list) */}
+      {(signalResult || fullResult) && !busy && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-3 py-1 bg-[#0B0B0D] border-b border-zinc-800/60">
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-5 text-right">#</span>
+          <span className="w-1 flex-shrink-0" />
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 flex-1">Model</span>
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-10 text-right">Signal</span>
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-8 text-right">Conf</span>
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-16 text-right">Entry</span>
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-16 text-right">SL</span>
+          <span className="text-[7px] uppercase tracking-widest text-zinc-600 w-16 text-right">T1</span>
+        </div>
+      )}
+
       {error && (
-        <div className="mx-3 mt-2.5 text-[10px] text-rose-400 border border-rose-500/30 bg-rose-500/10 rounded px-3 py-2" data-testid="ensemble-error">
+        <div className="flex-shrink-0 mx-3 mt-2 text-[10px] text-rose-400 border border-rose-500/30 bg-rose-500/8 rounded px-2 py-1.5" data-testid="ensemble-error">
           ⚠ {error}
         </div>
       )}
 
-      {/* Model list */}
-      <div className="flex-1 overflow-y-auto px-3 pb-4">
-        {allModels.length > 0 && (
-          <div className="mt-3 space-y-2" data-testid="signal-result">
-            {/* Consensus */}
-            <ConsensusRow verdict={signalResult?.verdict} />
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto min-h-0">
 
-            {/* Numbered model cards */}
-            <div className="text-[8px] font-bold uppercase tracking-[0.2em] text-zinc-600 mt-3 mb-1.5">
-              Individual Model Analysis ({allModels.length} Models)
+        {/* LOADING */}
+        {busy && activeTask === 'full' && <LoadingBar label="Asking all 45 models" />}
+        {busy && activeTask === 'signal' && <LoadingBar label="Asking 3 models" />}
+        {busy && activeTask === 'gann' && <LoadingBar label="Running AI Gann + SoQ optimisation" />}
+
+        {/* ── FULL ANALYSIS (45 models) ── */}
+        {!busy && mode === 'full' && fullResult && (
+          <div data-testid="full-analysis-result">
+            <ConsensusStrip
+              counts={fullResult.vote_counts}
+              total={fullResult.total}
+              avgConf={fullResult.avg_confidence}
+              consensus={fullResult.consensus}
+            />
+            <div>
+              {fullResult.models.map((r) => (
+                <ModelRow key={r.num} result={r} />
+              ))}
             </div>
-            {allModels.map((vote, i) => (
-              <ModelCard key={i} num={i + 1} vote={vote} />
-            ))}
-
-            {/* Kronos not loaded notice */}
-            {!signalResult?.kronos_loaded && (
-              <div className="border border-[#A855F7]/20 bg-[#A855F7]/5 rounded px-3 py-2">
-                <div className="text-[9px] text-[#A855F7] font-bold">Kronos AI — Model Not Loaded</div>
-                <div className="text-[9px] text-zinc-500 mt-0.5">
-                  Click WARMUP on Kronos panel below to load. Rerun after loading.
+            {/* OpenCode note */}
+            {fullResult.models.some(m => !m.ok && (m.error || '').includes('401')) && (
+              <div className="mx-3 my-3 px-3 py-2.5 border border-amber-500/20 bg-amber-500/5 rounded text-[9px]">
+                <div className="font-bold text-amber-400 mb-1">DeepSeek / GLM / Kimi / Qwen models need OpenCode auth</div>
+                <div className="text-zinc-500 leading-relaxed">
+                  Run <code className="font-mono text-zinc-300">npx 9router</code> locally → Connect OpenCode Free → Enable provider in AI Router settings.
+                  These models (numbered 30-45) will auto-work once 9router is running at localhost:20128.
                 </div>
               </div>
             )}
+          </div>
+        )}
 
-            {/* Context snapshot */}
-            {signalResult?.context && (
-              <div className="mt-2 border border-zinc-800/60 rounded bg-[#0E0E10] px-3 py-2">
-                <div className="text-[8px] font-bold uppercase tracking-[0.2em] text-zinc-600 mb-2">Market Context</div>
-                <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 text-[9px]">
+        {/* ── STANDARD (3 models) ── */}
+        {!busy && mode === 'standard' && signalResult && (
+          <div data-testid="signal-result">
+            {/* Mini consensus */}
+            <div className="px-3 py-2 bg-[#0E0E10] border-b border-zinc-800/60 flex items-center gap-3">
+              {(() => {
+                const v = signalResult.verdict;
+                const ss = sigStyle(v.consensus);
+                return (
+                  <>
+                    <span
+                      className="text-[10px] font-black px-2 py-0.5 rounded-sm"
+                      style={{ background: ss.bg, color: ss.text }}
+                      data-testid="consensus-signal"
+                    >{v.consensus}</span>
+                    <span className="text-[9px] text-zinc-400">
+                      {v.valid_voters}/{v.total_voters} models agree · {v.confidence}% conf
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+            {signalResult.verdict.per_model.map((r, i) => (
+              <ModelRow key={i} result={{ ...r, num: i + 1, family: r.provider === 'kronos' ? 'kronos' : r.provider }} />
+            ))}
+            {!signalResult.kronos_loaded && (
+              <div className="px-3 py-2 text-[9px] text-[#A855F7] border-t border-zinc-800/50 bg-[#A855F7]/5">
+                Kronos AI — Load model via WARMUP button below, then rerun.
+              </div>
+            )}
+            {signalResult.context && (
+              <div className="border-t border-zinc-800/60 px-3 py-2">
+                <div className="text-[8px] font-bold uppercase tracking-widest text-zinc-600 mb-1.5">Market Context</div>
+                <div className="grid grid-cols-3 gap-x-4 gap-y-1">
                   {Object.entries(signalResult.context).map(([k, v]) => (
-                    <div key={k}>
-                      <span className="text-zinc-600 uppercase tracking-wider">{k.replace(/_/g, ' ')}</span>
+                    <div key={k} className="text-[9px]">
+                      <span className="text-zinc-600 uppercase tracking-wider text-[7px]">{k.replace(/_/g,' ')}</span>
                       <div className="font-mono text-zinc-300">{String(v)}</div>
                     </div>
                   ))}
@@ -287,83 +409,55 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
           </div>
         )}
 
-        {/* Gann result */}
-        {gannResult && (
-          <div className="mt-3 space-y-3 border-t border-zinc-800 pt-3" data-testid="gann-result">
-            <div className="flex items-center gap-2 text-cyan-300 text-[9px] uppercase tracking-[0.15em]">
-              <Target size={12} weight="fill" /> AI Gann Pattern Recognition
-              <span className="ml-auto text-zinc-500">SoQ ring: {gannResult.soq_ring}</span>
-            </div>
-
-            <ConsensusRow verdict={gannResult.ensemble} />
-
-            {/* Gann individual votes */}
-            <div className="space-y-2">
-              {gannResult.ensemble?.votes?.map((v, i) => <ModelCard key={i} num={i + 1} vote={v} />)}
-            </div>
-
-            {/* Pivot */}
-            <div className="border border-zinc-800 rounded px-3 py-2 bg-zinc-900/40 text-[9px]">
-              <div className="text-zinc-500 uppercase tracking-wider mb-1">AI-Chosen Pivot</div>
-              <span className="font-mono text-zinc-200">{gannResult.chosen_pivot?.type}</span>
-              <span className="text-zinc-500 ml-2">
-                ₹{gannResult.chosen_pivot?.price?.toFixed(2)} · age {gannResult.chosen_pivot?.age_bars} bars
-              </span>
-            </div>
-
-            {/* Gann Fan levels */}
-            <div className="border border-zinc-800 rounded overflow-hidden">
-              <div className="px-3 py-1.5 text-[8px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800">
-                Gann Fan Levels
+        {/* ── GANN RESULT ── */}
+        {!busy && gannResult && (
+          <div className="border-t border-zinc-800/60 pt-2 pb-4 px-3" data-testid="gann-result">
+            <div className="text-[8px] font-black uppercase tracking-[0.2em] text-cyan-400 mb-2">AI Gann + SoQ Result</div>
+            {(() => {
+              const v = gannResult.ensemble;
+              if (!v) return null;
+              const ss = sigStyle(v.consensus);
+              return (
+                <div className="flex items-center gap-3 mb-3 px-2 py-2 rounded border"
+                  style={{ borderColor: ss.bg + '44', background: ss.bg + '10' }}>
+                  <span className="text-sm font-black" style={{ color: ss.bg }}>{v.consensus}</span>
+                  <span className="text-[9px] text-zinc-400">{v.confidence}% confidence</span>
+                </div>
+              );
+            })()}
+            {gannResult.ensemble?.votes?.map((v, i) => (
+              <ModelRow key={i} result={{ ...v, num: i + 1, family: 'gann' }} />
+            ))}
+            {/* SoQ levels table */}
+            {gannResult.soq_levels?.length > 0 && (
+              <div className="mt-3 border border-zinc-800 rounded overflow-hidden">
+                <div className="px-2 py-1 text-[7px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800 bg-zinc-900/40">
+                  Square of 9 — Ring {gannResult.soq_ring}
+                </div>
+                <div className="max-h-40 overflow-y-auto">
+                  {gannResult.soq_levels.map(l => (
+                    <div key={l.step} className="flex items-center gap-3 px-2 py-1 border-b border-zinc-800/40 text-[9px] font-mono hover:bg-zinc-800/30">
+                      <span className="text-zinc-600 w-4">{l.step}</span>
+                      <span className="text-zinc-500 w-8">{l.angle_deg}°</span>
+                      <span className="text-emerald-400 flex-1">R: ₹{l.resistance}</span>
+                      <span className="text-rose-400">S: ₹{l.support}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 p-2">
-                {gannResult.gann_fan?.map(g => (
-                  <div key={g.name} className="bg-black/40 border border-zinc-800 rounded p-1.5 text-[9px]">
-                    <div className="font-mono text-cyan-300">{g.name} <span className="text-zinc-600">({g.degrees}°)</span></div>
-                    <div className="text-emerald-400">R: ₹{g.resistance_100}</div>
-                    <div className="text-rose-400">S: ₹{g.support_100}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Square of 9 */}
-            <div className="border border-zinc-800 rounded overflow-hidden">
-              <div className="px-3 py-1.5 text-[8px] uppercase tracking-widest text-zinc-500 border-b border-zinc-800 flex items-center justify-between">
-                <span className="flex items-center gap-1"><Lightning size={10} /> Square of 9 — Ring {gannResult.soq_ring}</span>
-                <span>{gannResult.soq_levels?.length} levels</span>
-              </div>
-              <div className="max-h-48 overflow-y-auto p-2 text-[9px] font-mono">
-                <table className="w-full">
-                  <thead className="text-zinc-600 text-left">
-                    <tr>
-                      <th className="py-0.5 px-1">#</th>
-                      <th className="py-0.5 px-1">Angle</th>
-                      <th className="py-0.5 px-1 text-emerald-400">Res</th>
-                      <th className="py-0.5 px-1 text-rose-400">Sup</th>
-                    </tr>
-                  </thead>
-                  <tbody className="text-zinc-300">
-                    {gannResult.soq_levels?.map(l => (
-                      <tr key={l.step} className="border-t border-zinc-800/50 hover:bg-zinc-800/30">
-                        <td className="py-0.5 px-1 text-zinc-600">{l.step}</td>
-                        <td className="py-0.5 px-1">{l.angle_deg}°</td>
-                        <td className="py-0.5 px-1 text-emerald-300">₹{l.resistance}</td>
-                        <td className="py-0.5 px-1 text-rose-300">₹{l.support}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
-        {!signalResult && !gannResult && !busy && (
-          <div className="text-center py-10 text-zinc-600 text-[11px]">
-            <Brain size={32} weight="duotone" className="mx-auto mb-3 text-zinc-700" />
-            <div>Stock select karo aur <span className="text-fuchsia-400">Ask All Models</span> dabao</div>
-            <div className="text-[9px] mt-1 text-zinc-700">Claude · Gemini · GPT · Kronos — sabhi BUY/SELL/SL/Target denge</div>
+        {/* Empty state */}
+        {!busy && !signalResult && !fullResult && !gannResult && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-4">
+            <div className="text-3xl mb-3">◉</div>
+            <div className="text-[11px] text-zinc-400 font-medium">Stock select karke button dabao</div>
+            <div className="text-[9px] text-zinc-600 mt-2 leading-relaxed">
+              <span className="text-fuchsia-400">⚡ 3 Models</span> — Claude, Gemini, GPT (fast ~10s)<br/>
+              <span className="text-[#00E676]">◉ All 45</span> — Sabhi models ka full analysis (~35s)
+            </div>
           </div>
         )}
       </div>

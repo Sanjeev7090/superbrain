@@ -18,6 +18,12 @@ Recent fork additions (Feb 2026):
    - All AI features (MiroFish, GPT Analysis, Ensemble) auto-route through this
    - Frontend tab removed from UI (per user request) but backend APIs intact
    - ESLint fetchSignal missing dependency fixed (useCallback)
+9. Full 45-model analysis in AI Ensemble (✅ done — Jun 2026)
+   - All 45 models from 9router/OpenCode repo numbered 1-45
+   - 11/45 work via Emergent key (Claude Opus/Sonnet/Haiku + GPT 5.x)
+   - Remaining 34 show "Setup 9router" (need OpenCode auth)
+   - Parallel threading (asyncio.to_thread) — response in ~22s
+   - Each row: SIGNAL | ENTRY | SL | T1 | Conf | click to expand
 
 ## RL Environment Spec (updated Feb 2026)
 - **Action space:** Box[-1, 1] shape (16,)
