@@ -443,7 +443,6 @@ const TradingDashboard = () => {
     { id: 'paper',      label: 'PAPER'       },
     { id: 'rlagent',    label: 'RL AGENT'    },
     { id: 'ensemble',   label: 'AI ENSEMBLE' },
-    { id: '_divider_risk', label: 'RISK', isDivider: true },
     { id: 'picker',     label: 'PICKER'      },
     { id: 'pece',       label: 'PE-CE OI'    },
   ];
