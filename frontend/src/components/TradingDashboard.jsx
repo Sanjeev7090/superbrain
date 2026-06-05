@@ -477,9 +477,15 @@ const TradingDashboard = () => {
       {/* Header */}
       <header className="h-12 md:h-14 border-b border-slate-200 dark:border-white/10 flex items-center justify-between px-3 lg:px-6 bg-white/90 dark:bg-[#0A0A0A]/90 backdrop-blur-md z-50 shrink-0 transition-colors duration-200" data-testid="dashboard-header">
         <div className="flex items-center gap-3">
-          <h1 className="liquid-glass-brand text-sm md:text-lg font-black tracking-tighter uppercase" style={{ fontFamily: "'Chivo', sans-serif" }}>
-            <span className="text-slate-900 dark:text-white">GANN</span>
-            <span className="text-[#00E676] ml-1">TRADER</span>
+          <h1
+            className="liquid-glass-brand text-sm md:text-lg font-black tracking-tighter uppercase cursor-pointer"
+            style={{ fontFamily: "'Chivo', sans-serif" }}
+            onClick={() => window.location.href = '/'}
+            data-testid="brand-logo"
+            title="Go to Home"
+          >
+            <span className="text-slate-900 dark:text-white">Dreamer</span>
+            <span className="ml-1" style={{ fontFamily: 'serif', textTransform: 'none' }}>💤</span>
           </h1>
           <span className="hidden sm:inline text-[10px] text-slate-400 dark:text-zinc-500 font-mono tracking-wider border border-slate-200 dark:border-white/10 px-2 py-0.5">
             {isCrypto ? 'CRYPTO' : 'NSE'}
