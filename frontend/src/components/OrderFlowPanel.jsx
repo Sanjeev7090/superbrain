@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, CartesianGrid
 } from 'recharts';
-import { CaretDown, CaretUp, ChartBar } from '@phosphor-icons/react';
+import { ChartBar } from '@phosphor-icons/react';
 import { toast } from 'sonner';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -271,14 +271,13 @@ const DeltaChart = ({ candles }) => {
 
 // ─── Main Component ─────────────────────────────────────────────────
 export default function OrderFlowPanel({ stockData, selectedStock }) {
-  const [open, setOpen]       = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData]       = useState(null);
 
   const hasData = stockData?.bars?.length >= 30;
 
-  const analyze = async () => {
-    if (!hasData) { toast.error('Need at least 30 bars of data'); return; }
+  const analyze = useCallback(async () => {
+    if (!stockData?.bars?.length) return;
     setLoading(true);
     try {
       const resp = await axios.post(`${API}/orderflow/analyze`, {
@@ -290,38 +289,32 @@ export default function OrderFlowPanel({ stockData, selectedStock }) {
       });
       setData(resp.data);
     } catch (e) {
-      toast.error(e.response?.data?.detail || 'Order Flow analysis failed');
+      toast.error(e.response?.data?.detail || 'Footprint analysis failed');
     } finally {
       setLoading(false);
     }
-  };
+  }, [stockData, selectedStock]);
 
-  const handleToggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (next && !data && hasData) analyze();
-  };
-
-  const handleRefresh = (e) => {
-    e.stopPropagation();
-    if (hasData) { setData(null); analyze(); }
-  };
+  // Auto-fetch when stock or data changes
+  useEffect(() => {
+    setData(null);
+    if (stockData?.bars?.length >= 30) {
+      analyze();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStock, stockData]);
 
   return (
-    <div className="border-t border-white/10 bg-[#0A0A0A] shrink-0 flex flex-col relative z-20" data-testid="orderflow-panel">
+    <div className="border-t border-white/10 bg-[#0A0A0A] shrink-0 flex flex-col relative z-20" data-testid="footprint-panel">
 
-      {/* ── Toggle header — always visible ── */}
-      <button
-        onClick={handleToggle}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/5 transition-colors group active:bg-white/10"
-        data-testid="orderflow-toggle"
-      >
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
         <div className="flex items-center gap-2">
           <ChartBar size={14} weight="bold" className="text-[#818CF8]" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400 group-hover:text-white transition-colors">
-            Order Flow
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">
+            Footprint
           </span>
-          <span className="text-[8px] text-zinc-600 hidden sm:inline">Footprint · VP · CVD · Delta</span>
+          <span className="text-[8px] text-zinc-600 hidden sm:inline">· CVD · Delta</span>
           {data && (
             <span className="text-[8px] font-mono px-1 py-0.5 rounded"
               style={{ color: sigColor(data.signal_type), backgroundColor: sigColor(data.signal_type) + '20' }}>
@@ -329,76 +322,66 @@ export default function OrderFlowPanel({ stockData, selectedStock }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {open && data && (
-            <button onClick={handleRefresh}
-              className="text-[9px] font-mono text-zinc-600 hover:text-white px-1 py-1"
-              title="Refresh">↻</button>
-          )}
-          {open ? <CaretDown size={12} className="text-zinc-500" /> : <CaretUp size={12} className="text-zinc-500" />}
-        </div>
-      </button>
+        {data && (
+          <button
+            onClick={() => { setData(null); analyze(); }}
+            className="text-[9px] font-mono text-zinc-600 hover:text-white px-1 py-1"
+            title="Refresh"
+            data-testid="footprint-refresh"
+          >↻</button>
+        )}
+      </div>
 
-      {/* ── Expanded content — max height so chart always has space ── */}
-      {open && (
-        <div className="border-t border-white/5 overflow-y-auto" style={{ maxHeight: '55vh' }}>
-          {loading && (
-            <div className="flex items-center justify-center py-6 gap-2">
-              <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce" />
-              <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce delay-75" />
-              <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce delay-150" />
-              <span className="text-[10px] font-mono text-zinc-500 ml-1">Computing order flow…</span>
-            </div>
-          )}
+      {/* ── Content ── */}
+      <div className="overflow-y-auto" style={{ maxHeight: '38vh' }}>
+        {loading && (
+          <div className="flex items-center justify-center py-5 gap-2">
+            <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce" />
+            <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce delay-75" />
+            <div className="w-1 h-1 bg-[#818CF8] rounded-full animate-bounce delay-150" />
+            <span className="text-[10px] font-mono text-zinc-500 ml-1">Loading footprint…</span>
+          </div>
+        )}
 
-          {!loading && !data && !hasData && (
-            <p className="text-[10px] text-zinc-600 px-3 py-3">Select a stock and load chart data first.</p>
-          )}
+        {!loading && !data && !hasData && (
+          <p className="text-[10px] text-zinc-600 px-3 py-3">Select a stock and load chart data first.</p>
+        )}
 
-          {!loading && data && (
-            <div className="animate-fade-in">
-              {/* Signal Header */}
-              <SignalHeader d={data} />
+        {!loading && data && (
+          <div className="animate-fade-in">
+            {/* Signal row */}
+            <SignalHeader d={data} />
 
-              {/* Main content grid — 1 col on mobile, 2 col on lg+ */}
-              <div className="p-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                {/* Volume Profile */}
-                <VolumeProfile
-                  bins={data.vp_bins}
-                  poc={data.poc_price}
-                  vah={data.vah_price}
-                  val={data.val_price}
-                  height={220}
-                />
-                {/* Footprint — horizontal scroll on mobile */}
-                <div className="flex flex-col">
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-1 px-1">
-                    Footprint (last {data.footprint?.length} candles)
-                  </p>
-                  <div className="overflow-x-auto -mx-1 px-1">
-                    <FootprintView footprint={data.footprint} />
-                  </div>
+            {/* Main grid */}
+            <div className="p-2 space-y-2">
+              {/* Footprint — horizontal scroll on mobile */}
+              <div className="flex flex-col">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-1 px-1">
+                  Footprint (last {data.footprint?.length} candles)
+                </p>
+                <div className="overflow-x-auto -mx-1 px-1">
+                  <FootprintView footprint={data.footprint} />
                 </div>
               </div>
 
-              {/* CVD + Delta chart (full width) */}
-              <div className="px-2 pb-2">
+              {/* CVD + Delta chart */}
+              <div>
                 <p className="text-[9px] font-bold uppercase tracking-wider text-zinc-500 mb-1 px-1">
                   CVD + Delta (last 60 bars)
                 </p>
                 <DeltaChart candles={data.candles} />
               </div>
-
-              {/* Recommendation */}
-              <div className="px-3 pb-2">
-                <p className="text-[9px] text-zinc-500 leading-relaxed border border-white/5 bg-white/[0.02] p-2">
-                  {data.recommendation}
-                </p>
-              </div>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Recommendation */}
+            <div className="px-3 pb-2">
+              <p className="text-[9px] text-zinc-500 leading-relaxed border border-white/5 bg-white/[0.02] p-2">
+                {data.recommendation}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

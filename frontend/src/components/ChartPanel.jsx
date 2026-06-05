@@ -1,10 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import axios from 'axios';
 import { createChart } from 'lightweight-charts';
 import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning } from '@phosphor-icons/react';
 import GrowwTradeModal from './GrowwTradeModal';
 import StrategyOverlay from './StrategyOverlay';
 import TimeframeLevels from './TimeframeLevels';
 import { useTheme } from '../context/ThemeContext';
+
+const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const VP_WIDTH = 88;
 
 const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
@@ -15,12 +19,18 @@ const ChartPanel = ({
   const chartRef = useRef(null);
   const candlestickSeriesRef = useRef(null);
   const gannLineSeriesRef = useRef([]);
+  // Volume Profile refs
+  const vpCanvasRef = useRef(null);
+  const vpDataRef = useRef(null);
+  const vpAnimRef = useRef(null);
+  const vpPriceLinesRef = useRef([]);
   const [selectMode, setSelectMode] = useState(null);
   const [showGannLines, setShowGannLines] = useState(true);
   const [lineExtension, setLineExtension] = useState(50);
   const [isMovingMode, setIsMovingMode] = useState(false);
   const [tfOpen, setTfOpen] = useState(false);
   const [showTrade, setShowTrade] = useState(false);
+  const [vpActive, setVpActive] = useState(false);
   const { theme } = useTheme();
 
   const timeframes = [
@@ -46,6 +56,112 @@ const ChartPanel = ({
       gannLineSeriesRef.current = [];
     }
   };
+
+  // ── Volume Profile helpers ───────────────────────────────────────
+  const clearVPLines = useCallback(() => {
+    vpPriceLinesRef.current.forEach(pl => {
+      try { candlestickSeriesRef.current?.removePriceLine(pl); } catch (e) {}
+    });
+    vpPriceLinesRef.current = [];
+  }, []);
+
+  const drawVPCanvas = useCallback(() => {
+    const canvas = vpCanvasRef.current;
+    const series = candlestickSeriesRef.current;
+    const d = vpDataRef.current;
+    if (!canvas || !series || !d?.vp_bins?.length) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+    const dpr = window.devicePixelRatio || 1;
+    const H = container.clientHeight;
+    if (canvas.style.height !== `${H}px`) {
+      canvas.width = VP_WIDTH * dpr;
+      canvas.height = H * dpr;
+      canvas.style.width = `${VP_WIDTH}px`;
+      canvas.style.height = `${H}px`;
+    }
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, VP_WIDTH, H);
+    const bins = d.vp_bins;
+    const maxVol = Math.max(...bins.map(b => b.total_vol)) || 1;
+    const rowH = Math.max(3, (H / bins.length) * 0.72);
+    bins.forEach(bin => {
+      const y = series.priceToCoordinate(bin.price_mid);
+      if (y == null || y < -rowH || y > H + rowH) return;
+      const buyW = (bin.buy_vol / maxVol) * (VP_WIDTH - 4);
+      const sellW = (bin.sell_vol / maxVol) * (VP_WIDTH - 4);
+      const half = rowH / 2;
+      if (bin.in_value_area) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.fillRect(0, y - rowH, VP_WIDTH, rowH * 2);
+      }
+      if (buyW > 0) {
+        ctx.fillStyle = bin.in_value_area ? 'rgba(0,230,118,0.82)' : 'rgba(0,230,118,0.38)';
+        ctx.fillRect(1, y - half, buyW, half);
+      }
+      if (sellW > 0) {
+        ctx.fillStyle = bin.in_value_area ? 'rgba(255,59,48,0.82)' : 'rgba(255,59,48,0.38)';
+        ctx.fillRect(1, y, sellW, half);
+      }
+      if (bin.is_poc) {
+        ctx.strokeStyle = 'rgba(255,107,0,0.95)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 2]);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(VP_WIDTH, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#FF6B00';
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('◆', VP_WIDTH - 11, y - 2);
+      }
+    });
+    const markEdgeLabel = (price, label, color) => {
+      if (!price) return;
+      const y = series.priceToCoordinate(price);
+      if (y == null || y < 4 || y > H - 4) return;
+      ctx.fillStyle = color;
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText(label, 2, y - 2);
+    };
+    markEdgeLabel(d.vah_price, 'VAH', '#A855F7');
+    markEdgeLabel(d.val_price, 'VAL', '#06B6D4');
+    ctx.restore();
+  }, []);
+
+  const fetchVolumeProfile = useCallback(async (bars, ticker) => {
+    if (!bars || bars.length < 30) return;
+    try {
+      const resp = await axios.post(`${API}/orderflow/analyze`, {
+        ticker,
+        bars,
+        n_vp_bins: 30,
+        n_fp_levels: 8,
+        vp_lookback: Math.min(60, bars.length),
+      });
+      vpDataRef.current = resp.data;
+      clearVPLines();
+      const d = resp.data;
+      if (candlestickSeriesRef.current) {
+        [
+          [d.poc_price, 'POC', '#FF6B00', 1],
+          [d.vah_price, 'VAH', '#A855F7', 2],
+          [d.val_price, 'VAL', '#06B6D4', 2],
+        ].forEach(([price, title, color, lineStyle]) => {
+          if (!price) return;
+          try {
+            const pl = candlestickSeriesRef.current.createPriceLine({
+              price, color, lineWidth: 1, lineStyle, axisLabelVisible: true, title,
+            });
+            vpPriceLinesRef.current.push(pl);
+          } catch (e) {}
+        });
+      }
+      setVpActive(true);
+    } catch (e) {
+      console.warn('VP fetch:', e.message);
+    }
+  }, [clearVPLines]);
 
   const drawGannLines = (pivot, extension) => {
     if (!chartRef.current || !pivot || !stockData || !showGannLines) return;
@@ -189,6 +305,33 @@ const ChartPanel = ({
     candlestickSeriesRef.current.setData(chartData);
     chartRef.current.timeScale().fitContent();
   }, [stockData]);
+
+  // ── Volume Profile: fetch when stock/data changes ──────────────
+  useEffect(() => {
+    clearVPLines();
+    vpDataRef.current = null;
+    setVpActive(false);
+    if (!stockData?.bars?.length) return;
+    const ticker = selectedStock?.ticker || selectedStock?.symbol || 'STOCK';
+    // Small delay so chart settles first
+    const t = setTimeout(() => fetchVolumeProfile(stockData.bars, ticker), 400);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockData, selectedStock]);
+
+  // ── Volume Profile: animation loop ────────────────────────────
+  useEffect(() => {
+    if (!vpActive) {
+      if (vpAnimRef.current) cancelAnimationFrame(vpAnimRef.current);
+      return;
+    }
+    const loop = () => {
+      drawVPCanvas();
+      vpAnimRef.current = requestAnimationFrame(loop);
+    };
+    vpAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (vpAnimRef.current) cancelAnimationFrame(vpAnimRef.current); };
+  }, [vpActive, drawVPCanvas]);
 
   useEffect(() => {
     if (showGannLines && pivotPoint && stockData) {
@@ -400,6 +543,16 @@ const ChartPanel = ({
             <p className="text-[10px] text-slate-300 dark:text-zinc-600 mt-1 font-mono">Scroll to zoom / Drag to pan</p>
           </div>
         )}
+
+        {/* Volume Profile Canvas Overlay — left side, auto-synced with price scale */}
+        <canvas
+          ref={vpCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 5, pointerEvents: 'none',
+            display: vpActive ? 'block' : 'none',
+          }}
+        />
         
         {/* Strategy Overlay Component */}
         <StrategyOverlay 

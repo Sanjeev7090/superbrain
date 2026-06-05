@@ -172,6 +172,21 @@ Recent fork additions (Feb 2026):
 - Kronos now loads: MODEL: KRONOS-SMALL (from NeoQuasar/Kronos-small on HuggingFace)
 - API tested: `/api/kronos/warmup` → `{loaded: true}`, `/api/kronos/forecast` → returns candles
 
+## Session: Volume Profile on Chart + Footprint Restructure (Feb 2026)
+### ChartPanel.jsx
+- **Volume Profile Canvas Overlay**: Auto-fetches from `/api/orderflow/analyze` when stock is selected
+  - Canvas overlay (absolute, left:0, pointer-events:none) renders buy(green)/sell(red) bars per price bin
+  - RAF animation loop keeps bars in sync with chart zoom/pan
+  - `createPriceLine()` adds POC (orange), VAH (purple), VAL (cyan) dashed horizontal lines on chart
+  - 30-bin VP, 60-bar lookback, 400ms delay after chart settles
+
+### OrderFlowPanel.jsx (now Footprint Panel)
+- Removed collapsible "ORDER FLOW" toggle header
+- Auto-fetches footprint on stock/data change (useEffect on selectedStock + stockData)
+- Shows ONLY: Signal header + Footprint candles + CVD+Delta chart
+- Volume Profile section removed (now lives on chart)
+- Always-visible (no open/close toggle)
+
 ## P0/P1/P2 Backlog
 
 ### P1 (Next)

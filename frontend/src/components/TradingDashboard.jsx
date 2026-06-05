@@ -686,7 +686,7 @@ const TradingDashboard = () => {
               strategyData={strategyData}
             />
           </div>
-          {/* Order Flow Panel — below chart, scroll to see */}
+          {/* Footprint Panel — below chart, auto-fetches when stock loaded */}
           {stockData?.bars?.length >= 30 && (
             <OrderFlowPanel stockData={stockData} selectedStock={selectedStock} />
           )}
