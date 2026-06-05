@@ -37,11 +37,13 @@ MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 # ─── Architecture constants ───────────────────────────────────────────────────
-STATE_DIM   = 38    # TradingEnv observation dims
-ACTION_DIM  = 16    # TradingEnv action dims
-LATENT_DIM  = 128   # DreamerV3 latent representation (↑ from 64 — richer market state)
-HIDDEN_DIM  = 512   # MLP hidden size              (↑ from 256 — deeper feature extraction)
-OBS_ENC_DIM = 128   # Obs encoder bottleneck        (new — proper DreamerV3 encoding)
+STATE_DIM      = 38    # TradingEnv observation dims
+ACTION_DIM     = 16    # TradingEnv action dims
+LATENT_DIM     = 128   # DreamerV3 latent representation
+HIDDEN_DIM     = 512   # MLP hidden size
+OBS_ENC_DIM    = 128   # Obs encoder bottleneck
+KRONOS_FEAT_DIM = 7   # Kronos raw feature vector: [direction, conf, move%, Δclose, Δhigh, Δlow, vol]
+KRONOS_COND_DIM = 32  # Kronos conditioning vector injected into RSSM prior
 
 STRATEGY_NAMES = [
     "Godzilla TTE", "SMC", "MiroFish", "Explosive Volume",
@@ -122,10 +124,10 @@ class RSSM(nn.Module):
 
     def __init__(self):
         super().__init__()
-        # Prior: p(z_t | z_{t-1}, a_{t-1})
+        # Prior: p(z_t | z_{t-1}, a_{t-1}, k_t)  — Kronos-conditioned
         self.prior_net = nn.Sequential(
-            nn.Linear(LATENT_DIM + ACTION_DIM, HIDDEN_DIM), nn.SiLU(),
-            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),               nn.SiLU(),
+            nn.Linear(LATENT_DIM + ACTION_DIM + KRONOS_COND_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),                                  nn.SiLU(),
             nn.Linear(HIDDEN_DIM, LATENT_DIM * 2),
         )
         # Posterior: q(z_t | z_{t-1}, enc(o_t))   — uses encoded obs
@@ -142,9 +144,14 @@ class RSSM(nn.Module):
         return Normal(mean, std)
 
     def compute_prior(
-        self, prev_latent: torch.Tensor, action: torch.Tensor
+        self, prev_latent: torch.Tensor, action: torch.Tensor,
+        kronos_cond: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Normal]:
-        h    = torch.cat([prev_latent, action], dim=-1)
+        """p(z_t | z_{t-1}, a_{t-1}, k_t) — Kronos-conditioned world model prior."""
+        if kronos_cond is None:
+            kronos_cond = torch.zeros(prev_latent.shape[0], KRONOS_COND_DIM,
+                                      device=prev_latent.device)
+        h    = torch.cat([prev_latent, action, kronos_cond], dim=-1)
         dist = self._to_dist(self.prior_net(h))
         return dist.rsample(), dist
 
@@ -213,28 +220,69 @@ class Critic(nn.Module):
         return self.net(z)
 
 
+class KronosConditioner(nn.Module):
+    """
+    Encodes Kronos 7-dim market forecast features into a KRONOS_COND_DIM conditioning
+    vector that is injected into the RSSM prior at every imagination step.
+
+    This makes the world model's transition dynamics Kronos-aware:
+      p(z_t | z_{t-1}, a_{t-1}, Kronos_forecast_t)
+
+    Feature layout (KRONOS_FEAT_DIM = 7):
+      [0] direction_score  : +1 BUY / 0 WAIT / -1 SELL
+      [1] confidence       : 0 → 1
+      [2] move_pct         : expected net % price change (signed, normalised ÷ 10)
+      [3] pred_close_delta : (pred_close - last_close) / last_close
+      [4] pred_high_delta  : (pred_high  - last_close) / last_close
+      [5] pred_low_delta   : (pred_low   - last_close) / last_close
+      [6] forecast_volatility : std(pred_closes) / mean(pred_closes)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(KRONOS_FEAT_DIM, 64),         nn.SiLU(),
+            nn.Linear(64, 64),                       nn.SiLU(),
+            nn.Linear(64, KRONOS_COND_DIM),          nn.Tanh(),  # bounded [-1,1]
+        )
+
+    def forward(self, feat: torch.Tensor) -> torch.Tensor:
+        return self.net(feat)
+
+    def zeros(self, batch_size: int, device=None) -> torch.Tensor:
+        """Returns zero conditioning when Kronos is unavailable."""
+        return torch.zeros(batch_size, KRONOS_COND_DIM,
+                           device=device or "cpu")
+
+
 class ReplayBuffer:
+    """Stores transitions including per-step Kronos feature snapshot."""
+
     def __init__(self, capacity: int = 100_000):
         self._buf: deque = deque(maxlen=capacity)
 
-    def push(self, obs, action, reward, next_obs, done):
+    def push(self, obs, action, reward, next_obs, done,
+             kronos_feat: Optional[np.ndarray] = None):
+        kf = kronos_feat if kronos_feat is not None else np.zeros(KRONOS_FEAT_DIM, dtype=np.float32)
         self._buf.append((
             np.asarray(obs,      dtype=np.float32),
             np.asarray(action,   dtype=np.float32),
             float(reward),
             np.asarray(next_obs, dtype=np.float32),
             float(done),
+            np.asarray(kf,       dtype=np.float32),
         ))
 
     def sample(self, n: int):
-        batch           = random.sample(self._buf, min(n, len(self._buf)))
-        obs, act, rew, nobs, done = zip(*batch)
+        batch = random.sample(self._buf, min(n, len(self._buf)))
+        obs, act, rew, nobs, done, kfeat = zip(*batch)
         return (
             torch.FloatTensor(np.stack(obs)),
             torch.FloatTensor(np.stack(act)),
             torch.FloatTensor(rew).unsqueeze(1),
             torch.FloatTensor(np.stack(nobs)),
             torch.FloatTensor(done).unsqueeze(1),
+            torch.FloatTensor(np.stack(kfeat)),   # (B, KRONOS_FEAT_DIM)
         )
 
     def __len__(self):
@@ -257,18 +305,20 @@ class DreamerV3Agent:
         lr:       float = 3e-4,
         gamma:    float = 0.99,
         lambda_:  float = 0.95,
-        horizon:  int   = 20,      # ↑ from 15 — captures longer market cycles (≈1 trading month)
+        horizon:  int   = 20,
     ):
-        self.encoder      = ObsEncoder()
-        self.rssm         = RSSM()
-        self.reward_pred  = RewardPredictor()
-        self.actor        = Actor()
-        self.critic       = Critic()
-        self.target_critic= Critic()
+        self.encoder       = ObsEncoder()
+        self.kronos_cond   = KronosConditioner()   # Kronos → RSSM conditioning
+        self.rssm          = RSSM()
+        self.reward_pred   = RewardPredictor()
+        self.actor         = Actor()
+        self.critic        = Critic()
+        self.target_critic = Critic()
         self.target_critic.load_state_dict(self.critic.state_dict())
 
         wm_params = (
             list(self.encoder.parameters())
+            + list(self.kronos_cond.parameters())   # train Kronos encoder jointly
             + list(self.rssm.parameters())
             + list(self.reward_pred.parameters())
         )
@@ -285,35 +335,42 @@ class DreamerV3Agent:
     def _zero_lat(self, batch_size: int) -> torch.Tensor:
         return torch.zeros(batch_size, LATENT_DIM)
 
-    def act(self, obs: np.ndarray, deterministic: bool = False) -> np.ndarray:
+    def act(
+        self, obs: np.ndarray,
+        deterministic: bool = False,
+        kronos_feat: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         obs_t = torch.FloatTensor(obs).unsqueeze(0)
         with torch.no_grad():
-            enc      = self.encoder(obs_t)
-            # Use distribution mean for deterministic inference (rebalance/predict)
-            z_dist   = self.rssm._to_dist(self.rssm.posterior_net(
-                torch.cat([self._zero_lat(1), enc], dim=-1)
-            ))
-            z        = z_dist.mean if deterministic else z_dist.rsample()
+            enc = self.encoder(obs_t)
+            # Posterior latent
+            z_dist = self.rssm._to_dist(
+                self.rssm.posterior_net(torch.cat([self._zero_lat(1), enc], dim=-1))
+            )
+            z = z_dist.mean if deterministic else z_dist.rsample()
             a_params = self.actor.net(z)
-            a_mean, a_log_std = torch.chunk(a_params, 2, dim=-1)
-            a        = torch.tanh(a_mean) if deterministic else self.actor(z)[0]
+            a_mean, _ = torch.chunk(a_params, 2, dim=-1)
+            a = torch.tanh(a_mean) if deterministic else self.actor(z)[0]
         return a.squeeze(0).cpu().numpy()
 
     # ---- world model update ----
 
     def update_world_model(self, batch) -> float:
-        obs, act, rew, next_obs, _ = batch
+        obs, act, rew, next_obs, _, kfeat = batch
         B  = obs.shape[0]
         z0 = self._zero_lat(B)
 
         enc_obs = self.encoder(obs)                              # (B, OBS_ENC_DIM)
         z_post, post_dist = self.rssm.compute_posterior(z0, enc_obs)
-        _, prior_dist      = self.rssm.compute_prior(z0, act)
+
+        # Kronos-conditioned prior
+        k_cond = self.kronos_cond(kfeat)                        # (B, KRONOS_COND_DIM)
+        _, prior_dist = self.rssm.compute_prior(z0, act, k_cond)
 
         # Reward reconstruction
         rew_loss = nn.MSELoss()(self.reward_pred(z_post), rew)
 
-        # KL(posterior || prior) — free-bits 0.1 nats
+        # KL(posterior || Kronos-conditioned prior) — free-bits 0.1 nats
         kl_loss = torch.distributions.kl_divergence(
             post_dist, prior_dist
         ).mean().clamp(min=0.1)
@@ -324,6 +381,7 @@ class DreamerV3Agent:
         loss.backward()
         nn.utils.clip_grad_norm_(
             list(self.encoder.parameters())
+            + list(self.kronos_cond.parameters())
             + list(self.rssm.parameters())
             + list(self.reward_pred.parameters()),
             max_norm=10.0,
@@ -334,17 +392,21 @@ class DreamerV3Agent:
     # ---- actor-critic update on imagined trajectories ----
 
     def update_actor_critic(
-        self, batch, kronos_bonus: float = 0.0
+        self, batch, kronos_feat: Optional[np.ndarray] = None
     ) -> Tuple[float, float]:
-        obs, act, rew, next_obs, _ = batch
+        """Imagines H-step trajectories using Kronos-conditioned RSSM prior."""
+        obs, act, rew, next_obs, _, kfeat_batch = batch
         B  = obs.shape[0]
         z0 = self._zero_lat(B)
 
+        # Encode obs and get Kronos conditioning for imagination
         with torch.no_grad():
-            enc_obs   = self.encoder(obs)
+            enc_obs    = self.encoder(obs)
             start_z, _ = self.rssm.compute_posterior(z0, enc_obs)
+            # Use per-batch Kronos features for imagination conditioning
+            k_cond     = self.kronos_cond(kfeat_batch)          # (B, KRONOS_COND_DIM)
 
-        # Imagined rollout
+        # Imagined rollout — every step uses Kronos-conditioned prior
         latents, rewards, values, log_probs = [], [], [], []
         cur_z = start_z.detach()
 
@@ -352,9 +414,9 @@ class DreamerV3Agent:
             a_img, lp = self.actor(cur_z)            # gradients through actor
 
             with torch.no_grad():
-                r_pred   = self.reward_pred(cur_z) + kronos_bonus
-                v_pred   = self.target_critic(cur_z)
-                next_z, _= self.rssm.compute_prior(cur_z, a_img)
+                r_pred    = self.reward_pred(cur_z)
+                v_pred    = self.target_critic(cur_z)
+                next_z, _ = self.rssm.compute_prior(cur_z, a_img, k_cond)
 
             latents.append(cur_z)
             rewards.append(r_pred)
@@ -409,12 +471,12 @@ class DreamerV3Agent:
     def save(self, path: str):
         torch.save({
             "encoder":       self.encoder.state_dict(),
+            "kronos_cond":   self.kronos_cond.state_dict(),
             "rssm":          self.rssm.state_dict(),
             "reward_pred":   self.reward_pred.state_dict(),
             "actor":         self.actor.state_dict(),
             "critic":        self.critic.state_dict(),
             "target_critic": self.target_critic.state_dict(),
-            # store dims so load can validate architecture
             "latent_dim":    LATENT_DIM,
             "hidden_dim":    HIDDEN_DIM,
             "horizon":       self.horizon,
@@ -423,13 +485,14 @@ class DreamerV3Agent:
 
     def load(self, path: str):
         ckpt = torch.load(path, map_location="cpu", weights_only=True)
-        # Validate architecture compatibility
         if ckpt.get("latent_dim", LATENT_DIM) != LATENT_DIM:
             raise ValueError(
                 f"Saved model latent_dim={ckpt['latent_dim']} "
                 f"!= current LATENT_DIM={LATENT_DIM}. Delete model and retrain."
             )
         self.encoder.load_state_dict(ckpt["encoder"])
+        if "kronos_cond" in ckpt:
+            self.kronos_cond.load_state_dict(ckpt["kronos_cond"])
         self.rssm.load_state_dict(ckpt["rssm"])
         self.reward_pred.load_state_dict(ckpt["reward_pred"])
         self.actor.load_state_dict(ckpt["actor"])
@@ -440,32 +503,56 @@ class DreamerV3Agent:
 
 # ─── Kronos Integration ───────────────────────────────────────────────────────
 
-def _get_kronos_bonus(ticker: str) -> float:
+# Per-mode Kronos refresh intervals (in env steps)
+KRONOS_REFRESH = {
+    "historical": 300,   # historical data rarely changes → refresh every 300 steps
+    "live":        50,   # live market → refresh every 50 steps (≈ every ~5 candles)
+    "hybrid":     150,   # blend of both
+}
+
+
+def _get_kronos_features(ticker: str, pred_len: int = 5) -> Tuple[np.ndarray, float]:
     """
-    Fetch Kronos price-forecast direction and return a reward-shaping bonus.
-    Uses the already-loaded Kronos predictor from kronos_router (no new download).
-    Returns 0.0 if Kronos is not loaded or any error occurs.
+    Fetch Kronos forecast → extract 7 normalised features + reward bonus.
+
+    Features (KRONOS_FEAT_DIM = 7):
+      [0] direction_score  : +1 BUY / 0 WAIT / -1 SELL
+      [1] confidence       : 0 → 1
+      [2] move_pct         : expected net % change ÷ 10  (normalised)
+      [3] pred_close_delta : (mean_pred_close - last_close) / last_close
+      [4] pred_high_delta  : (max_pred_high  - last_close) / last_close
+      [5] pred_low_delta   : (min_pred_low   - last_close) / last_close
+      [6] forecast_vol     : std(pred_closes) / (mean_pred_closes + 1e-8)
+
+    Returns (features, bonus):
+      features: np.ndarray of shape (KRONOS_FEAT_DIM,) in float32
+      bonus:    scalar reward-shaping value (0 if unavailable)
     """
+    zero = np.zeros(KRONOS_FEAT_DIM, dtype=np.float32)
     try:
         import sys
         import importlib
+        import pandas as pd
 
-        # Resolve kronos_router from parent backend directory
         parent = str(Path(__file__).parent.parent)
         if parent not in sys.path:
             sys.path.insert(0, parent)
 
-        kr = importlib.import_module("kronos_router")
+        kr        = importlib.import_module("kronos_router")
         predictor = getattr(kr, "_PREDICTOR", None)
         if predictor is None:
-            return 0.0
+            return zero, 0.0
 
-        import pandas as pd
         _fetch  = getattr(kr, "_fetch_history")
         _signal = getattr(kr, "_build_signal")
         _ftss   = getattr(kr, "_build_future_timestamps")
 
         hist = _fetch(ticker, "1d", 60)
+        if hist is None or len(hist) < 20:
+            return zero, 0.0
+
+        last_close = float(hist["Close"].iloc[-1])
+
         in_df = pd.DataFrame({
             "open":   hist["Open"].astype(float).values,
             "high":   hist["High"].astype(float).values,
@@ -475,24 +562,55 @@ def _get_kronos_bonus(ticker: str) -> float:
         })
         in_df["amount"] = in_df["volume"] * in_df["close"]
 
-        x_ts      = pd.Series(pd.to_datetime(hist.index)).reset_index(drop=True)
-        y_ts_idx  = _ftss(x_ts.iloc[-1], 5, "1d")
-        y_ts      = pd.Series(y_ts_idx)
+        x_ts     = pd.Series(pd.to_datetime(hist.index)).reset_index(drop=True)
+        y_ts_idx = _ftss(x_ts.iloc[-1], pred_len, "1d")
+        y_ts     = pd.Series(y_ts_idx)
 
         pred_df = predictor.predict(
             df=in_df, x_timestamp=x_ts, y_timestamp=y_ts,
-            pred_len=5, T=1.0, top_p=0.9, sample_count=1, verbose=False,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1, verbose=False,
         )
         sig = _signal(hist, pred_df)
 
         direction  = sig.get("direction", "WAIT")
-        confidence = sig.get("confidence", 50) / 100.0
-        bonus      = confidence * 0.15 if direction != "WAIT" else 0.0
-        return float(bonus)
+        confidence = float(sig.get("confidence", 50)) / 100.0
+
+        dir_score = 1.0 if direction == "BUY" else (-1.0 if direction == "SELL" else 0.0)
+
+        # Extract multi-candle forecast statistics
+        pred_closes = pred_df["close"].astype(float).values if "close" in pred_df else np.array([last_close])
+        pred_highs  = pred_df["high"].astype(float).values  if "high"  in pred_df else np.array([last_close])
+        pred_lows   = pred_df["low"].astype(float).values   if "low"   in pred_df else np.array([last_close])
+
+        mean_pred_close = float(pred_closes.mean())
+        max_pred_high   = float(pred_highs.max())
+        min_pred_low    = float(pred_lows.min())
+        forecast_vol    = float(pred_closes.std() / (mean_pred_close + 1e-8))
+
+        move_pct = (mean_pred_close - last_close) / (last_close + 1e-8)
+
+        feat = np.array([
+            dir_score,                                             # [0]
+            confidence,                                            # [1]
+            float(np.clip(move_pct / 0.10, -3.0, 3.0)),          # [2] norm ÷10%
+            float(np.clip((mean_pred_close - last_close) / (last_close + 1e-8), -0.5, 0.5)),  # [3]
+            float(np.clip((max_pred_high   - last_close) / (last_close + 1e-8),  0.0, 0.5)),  # [4]
+            float(np.clip((min_pred_low    - last_close) / (last_close + 1e-8), -0.5, 0.0)),  # [5]
+            float(np.clip(forecast_vol, 0.0, 0.1) * 10),         # [6] scale 0-1
+        ], dtype=np.float32)
+
+        # Reward bonus: confidence × direction × magnitude
+        bonus = confidence * abs(dir_score) * min(abs(move_pct) / 0.02 + 0.5, 0.20)
+
+        logger.debug(
+            "Kronos features [%s]: dir=%+.0f conf=%.2f move=%.3f%% bonus=%.4f",
+            ticker, dir_score, confidence, move_pct * 100, bonus,
+        )
+        return feat, float(bonus)
 
     except Exception as exc:
-        logger.debug("Kronos bonus skipped for %s: %s", ticker, exc)
-        return 0.0
+        logger.debug("Kronos features skipped for %s: %s", ticker, exc)
+        return zero, 0.0
 
 
 # ─── Background Training Worker ──────────────────────────────────────────────
@@ -500,10 +618,17 @@ def _get_kronos_bonus(ticker: str) -> float:
 BATCH_SIZE    = 64
 WARMUP_STEPS  = 500
 UPDATE_EVERY  = 4
-KRONOS_REFRESH_EPISODES = 10   # re-query Kronos every N episodes
 
 
 def _train_worker(mode: str, ticker: str, timesteps: int):
+    """
+    Unified training loop for all modes.
+
+    Kronos adaptive schedule (steps between refreshes):
+      historical → 300  (market context rarely changes)
+      live       → 50   (fresh candles ≈ every 5 steps)
+      hybrid     → 150  (blend)
+    """
     _stop_evt.clear()
     try:
         from .trading_env import TradingEnv
@@ -519,7 +644,7 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
             started_at=datetime.now(timezone.utc).isoformat(),
         )
 
-        # Load historical OHLCV data for historical/hybrid modes
+        # ── Load historical OHLCV ──
         df_hist = None
         if mode in ("historical", "hybrid"):
             try:
@@ -547,7 +672,13 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
                 logger.warning("Stale model removed (%s) — fresh start", exc)
                 os.remove(model_path)
 
-        kronos_bonus  = 0.0
+        # ── Kronos state ──
+        kronos_refresh = KRONOS_REFRESH.get(mode, 150)
+        kronos_feat    = np.zeros(KRONOS_FEAT_DIM, dtype=np.float32)
+        kronos_bonus   = 0.0
+        kronos_active  = False
+        next_kronos_step = 0          # step at which to refresh Kronos
+
         ep_rewards: List[float] = []
         total_steps   = 0
         episode       = 0
@@ -555,41 +686,52 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
 
         while total_steps < timesteps and not _stop_evt.is_set():
             obs, _ = env.reset()
-            ep_reward  = 0.0
-            done       = False
-
-            # Refresh Kronos bonus periodically
-            if episode % KRONOS_REFRESH_EPISODES == 0:
-                kronos_bonus = _get_kronos_bonus(ticker)
-                _upd(
-                    kronos_active=(kronos_bonus > 0),
-                    kronos_bonus=round(kronos_bonus, 4),
-                )
+            ep_reward = 0.0
+            done      = False
 
             while not done and not _stop_evt.is_set():
-                # Warm-up: random exploration before using actor
+
+                # ── Adaptive Kronos refresh ──
+                if total_steps >= next_kronos_step:
+                    new_feat, new_bonus = _get_kronos_features(ticker)
+                    active = bool(new_bonus > 0)
+                    if active:
+                        kronos_feat   = new_feat
+                        kronos_bonus  = new_bonus
+                        kronos_active = True
+                    else:
+                        kronos_active = bool(kronos_feat.any())  # keep last if fresh fails
+                    next_kronos_step = total_steps + kronos_refresh
+                    _upd(
+                        kronos_active=kronos_active,
+                        kronos_bonus=round(float(kronos_bonus), 4),
+                    )
+
+                # ── Action selection ──
                 if total_steps < WARMUP_STEPS or random.random() < 0.05:
                     action = env.action_space.sample()
                 else:
-                    action = agent.act(obs)
+                    action = agent.act(obs, kronos_feat=kronos_feat)
 
                 next_obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
 
-                # Kronos reward shaping: bonus aligned with trade direction
+                # Kronos reward shaping: bonus × signed trade direction
                 trade_sig   = info.get("trade_signal", 0.0)
-                shaped_rew  = reward + kronos_bonus * float(np.sign(trade_sig + 1e-8))
+                dir_align   = float(np.sign(trade_sig + 1e-8)) * kronos_feat[0]  # feat[0]=dir_score
+                shaped_rew  = reward + kronos_bonus * max(dir_align, 0.0)
 
-                replay.push(obs, action, shaped_rew, next_obs, float(done))
+                replay.push(obs, action, shaped_rew, next_obs, float(done),
+                            kronos_feat=kronos_feat)
                 obs         = next_obs
                 ep_reward  += reward
                 total_steps += 1
 
-                # Train every UPDATE_EVERY steps once buffer has data
+                # ── Training update ──
                 if len(replay) >= BATCH_SIZE and total_steps % UPDATE_EVERY == 0:
                     batch = replay.sample(BATCH_SIZE)
                     wm_l  = agent.update_world_model(batch)
-                    a_l, c_l = agent.update_actor_critic(batch, kronos_bonus)
+                    a_l, c_l = agent.update_actor_critic(batch)
                     _upd(
                         timesteps_done=total_steps,
                         wm_loss=round(float(wm_l), 6),
@@ -621,46 +763,72 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
                 current_drawdown=float(drawdn),
             )
 
-        # ── Training complete ──
+        # ── Phase done ──
         if not _stop_evt.is_set():
             agent.save(model_path)
             _upd(status="running", model_saved=True)
 
-            # Hybrid: keep fine-tuning with live data
+            # ── Hybrid Phase 2: Live fine-tuning with Kronos live refresh ──
             if mode == "hybrid":
                 _upd(mode="live", status="training")
+                kronos_refresh = KRONOS_REFRESH["live"]
                 env2 = TradingEnv(ticker=ticker)
                 fine_tune_steps = max(5_000, timesteps // 5)
                 ep_rewards2: List[float] = []
                 total2 = 0
+                next_k2 = 0
+
                 while total2 < fine_tune_steps and not _stop_evt.is_set():
                     obs2, _ = env2.reset()
                     ep2 = 0.0
                     done2 = False
                     info2: Dict = {}
+
                     while not done2 and not _stop_evt.is_set():
-                        if total2 < WARMUP_STEPS:
-                            a2 = env2.action_space.sample()
-                        else:
-                            a2 = agent.act(obs2)
+                        # Live Kronos refresh (more frequent)
+                        if total2 >= next_k2:
+                            nf, nb = _get_kronos_features(ticker)
+                            if nb > 0:
+                                kronos_feat  = nf
+                                kronos_bonus = nb
+                            next_k2 = total2 + kronos_refresh
+                            _upd(
+                                kronos_active=bool(kronos_bonus > 0),
+                                kronos_bonus=round(float(kronos_bonus), 4),
+                            )
+
+                        a2 = agent.act(obs2, kronos_feat=kronos_feat) if total2 >= WARMUP_STEPS else env2.action_space.sample()
                         no2, r2, t2, tr2, info2 = env2.step(a2)
                         done2 = t2 or tr2
-                        replay.push(obs2, a2, r2, no2, float(done2))
-                        obs2 = no2
-                        ep2 += r2
+
+                        trade2    = info2.get("trade_signal", 0.0)
+                        dir2      = float(np.sign(trade2 + 1e-8)) * kronos_feat[0]
+                        sr2       = r2 + kronos_bonus * max(dir2, 0.0)
+
+                        replay.push(obs2, a2, sr2, no2, float(done2), kronos_feat=kronos_feat)
+                        obs2   = no2
+                        ep2   += r2
                         total2 += 1
+
                         if len(replay) >= BATCH_SIZE and total2 % UPDATE_EVERY == 0:
                             b2 = replay.sample(BATCH_SIZE)
                             wl2 = agent.update_world_model(b2)
                             al2, cl2 = agent.update_actor_critic(b2)
-                            _upd(wm_loss=round(float(wl2), 6),
-                                 actor_loss=round(float(al2), 6))
+                            _upd(
+                                timesteps_done=timesteps + total2,
+                                wm_loss=round(float(wl2), 6),
+                                actor_loss=round(float(al2), 6),
+                                critic_loss=round(float(cl2), 6),
+                            )
+
                     ep_rewards2.append(ep2)
                     avg10_2 = float(np.mean(ep_rewards2[-10:])) if ep_rewards2 else 0.0
-                    _upd(avg_reward_10=avg10_2,
-                         timesteps_done=timesteps + total2,
-                         last_weights=info2.get("strategy_weights", _DEFAULT_WEIGHTS),
-                         last_trade_signal=info2.get("trade_signal", 0.0))
+                    _upd(
+                        avg_reward_10=avg10_2,
+                        last_weights=info2.get("strategy_weights", _DEFAULT_WEIGHTS),
+                        last_trade_signal=info2.get("trade_signal", 0.0),
+                    )
+
                 if not _stop_evt.is_set():
                     agent.save(model_path)
                     _upd(status="running")
@@ -675,7 +843,7 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
 # ─── Live Continuous Learning ─────────────────────────────────────────────────
 
 def _live_loop(ticker: str):
-    """Periodically re-trains model with fresh market data (live mode)."""
+    """Continuously fine-tunes model with fresh market data + live Kronos context."""
     while not _stop_evt.is_set():
         time.sleep(300)
         if _stop_evt.is_set():
@@ -687,22 +855,41 @@ def _live_loop(ticker: str):
             model_path = str(MODELS_DIR / f"dreamer_{ticker.replace('.', '_')}.pt")
             if not os.path.exists(model_path):
                 continue
+
             agent  = DreamerV3Agent()
             agent.load(model_path)
             env    = TradingEnv(ticker=ticker)
             replay = ReplayBuffer(capacity=10_000)
             obs, _ = env.reset()
-            for _ in range(1000):
+
+            # Fresh Kronos features for this live cycle
+            kfeat, kbonus = _get_kronos_features(ticker)
+            _upd(kronos_active=bool(kbonus > 0), kronos_bonus=round(float(kbonus), 4))
+
+            for step in range(1000):
                 if _stop_evt.is_set():
                     break
-                a = agent.act(obs)
-                no, r, t, tr, _ = env.step(a)
-                replay.push(obs, a, r, no, float(t or tr))
-                obs = no if not (t or tr) else env.reset()[0]
+                a = agent.act(obs, kronos_feat=kfeat)
+                no, r, t, tr, info = env.step(a)
+                done = t or tr
+                trade_sig = info.get("trade_signal", 0.0)
+                dir_align = float(np.sign(trade_sig + 1e-8)) * kfeat[0]
+                sr = r + kbonus * max(dir_align, 0.0)
+                replay.push(obs, a, sr, no, float(done), kronos_feat=kfeat)
+                obs = no if not done else env.reset()[0]
+
+                # Refresh Kronos every 50 steps in live mode
+                if step % KRONOS_REFRESH["live"] == 0:
+                    nf, nb = _get_kronos_features(ticker)
+                    if nb > 0:
+                        kfeat, kbonus = nf, nb
+                    _upd(kronos_active=bool(kbonus > 0), kronos_bonus=round(float(kbonus), 4))
+
                 if len(replay) >= BATCH_SIZE:
                     b = replay.sample(BATCH_SIZE)
                     agent.update_world_model(b)
                     agent.update_actor_critic(b)
+
             agent.save(model_path)
             _upd(timesteps_done=_state["timesteps_done"] + 1000)
         except Exception as exc:
@@ -902,6 +1089,10 @@ def get_prediction(ticker: str) -> Dict:
         signal     = "HOLD"
         confidence = int((0.3 - abs(trade_sig)) / 0.3 * 100)
 
+    kronos_bonus  = s.get("kronos_bonus", 0.0)
+    kronos_active = s.get("kronos_active", False)
+    mode          = s.get("mode", "historical")
+
     return {
         "signal":           signal,
         "confidence":       confidence,
@@ -914,12 +1105,14 @@ def get_prediction(ticker: str) -> Dict:
         "avg_reward_10":    s.get("avg_reward_10",  0.0),
         "wm_loss":          s.get("wm_loss",        0.0),
         "actor_loss":       s.get("actor_loss",     0.0),
-        "kronos_active":    s.get("kronos_active",  False),
-        "kronos_bonus":     s.get("kronos_bonus",   0.0),
+        "critic_loss":      s.get("critic_loss",    0.0),
+        "kronos_active":    kronos_active,
+        "kronos_bonus":     kronos_bonus,
+        "kronos_refresh_rate": KRONOS_REFRESH.get(mode, 150),
         "message": (
             f"Ep {s['episode']} | "
             f"WM: {s.get('wm_loss', 0):.4f} | "
             f"Avg Rew: {s.get('avg_reward_10', 0):.4f}"
-            + (" | Kronos Active" if s.get("kronos_active") else "")
+            + (f" | Kronos ×{KRONOS_REFRESH.get(mode, 150)}-step" if kronos_active else "")
         ),
     }

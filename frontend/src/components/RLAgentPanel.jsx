@@ -191,6 +191,7 @@ export default function RLAgentPanel({ selectedStock }) {
             { label: 'Horizon',  val: '20 steps' },
             { label: 'Hidden',   val: '512-wide' },
             { label: 'RSSM',     val: 'Enc + Prior + Post' },
+            { label: 'Kronos',   val: 'COND injected' },
           ].map(({ label, val }) => (
             <div key={label} className="flex items-center gap-1 bg-white/5 rounded px-2 py-1">
               <span className="text-[9px] text-zinc-500">{label}:</span>
@@ -339,6 +340,14 @@ export default function RLAgentPanel({ selectedStock }) {
                 <span className="text-[9px] text-cyan-400">Kronos Bonus</span>
                 <span className="text-[9px] font-mono text-cyan-300">
                   +{(status?.kronos_bonus ?? 0).toFixed(4)}
+                </span>
+              </div>
+            )}
+            {status?.kronos_active && (
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-cyan-500">Refresh Every</span>
+                <span className="text-[9px] font-mono text-cyan-400">
+                  {mode === 'live' ? '50' : mode === 'hybrid' ? '150' : '300'} steps
                 </span>
               </div>
             )}
