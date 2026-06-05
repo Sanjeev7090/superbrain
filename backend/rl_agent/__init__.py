@@ -1,1 +1,1 @@
-# RL Agent module — PPO/SAC trading agent using stable-baselines3
+# RL Agent module — DreamerV3 world-model trading agent

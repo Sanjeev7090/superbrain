@@ -14,10 +14,10 @@ const STRATEGY_NAMES = [
 ];
 
 const STATUS_CONFIG = {
-  idle:     { color: '#6b7280', bg: 'bg-gray-500/20', label: 'Idle',     pulse: false },
-  training: { color: '#f59e0b', bg: 'bg-amber-500/20', label: 'Training', pulse: true  },
-  paused:   { color: '#3b82f6', bg: 'bg-blue-500/20',  label: 'Paused',   pulse: false },
-  running:  { color: '#10b981', bg: 'bg-emerald-500/20', label: 'Live',   pulse: true  },
+  idle:     { color: '#6b7280', bg: 'bg-gray-500/20',    label: 'Idle',     pulse: false },
+  training: { color: '#f59e0b', bg: 'bg-amber-500/20',   label: 'Training', pulse: true  },
+  paused:   { color: '#3b82f6', bg: 'bg-blue-500/20',    label: 'Paused',   pulse: false },
+  running:  { color: '#10b981', bg: 'bg-emerald-500/20', label: 'Live',     pulse: true  },
 };
 
 const SIGNAL_CONFIG = {
@@ -53,18 +53,16 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 export default function RLAgentPanel({ selectedStock }) {
-  const [status, setStatus]       = useState(null);
-  const [algorithm, setAlgorithm] = useState('PPO');
-  const [mode, setMode]           = useState('historical');
-  const [ticker, setTicker]       = useState('RELIANCE.NS');
-  const [timesteps, setTimesteps] = useState(50000);
-  const [loading, setLoading]     = useState(false);
+  const [status, setStatus]         = useState(null);
+  const [mode, setMode]             = useState('historical');
+  const [ticker, setTicker]         = useState('RELIANCE.NS');
+  const [timesteps, setTimesteps]   = useState(50000);
+  const [loading, setLoading]       = useState(false);
   const [prediction, setPrediction] = useState(null);
-  const [rebalance, setRebalance]   = useState(null);   // AI Rebalance result
+  const [rebalance, setRebalance]   = useState(null);
   const [rebalancing, setRebalancing] = useState(false);
   const pollRef = useRef(null);
 
-  // Sync ticker from selected stock
   useEffect(() => {
     if (selectedStock?.ticker && selectedStock.type !== 'CRYPTO' && selectedStock.type !== 'OPTION') {
       setTicker(selectedStock.ticker);
@@ -85,7 +83,6 @@ export default function RLAgentPanel({ selectedStock }) {
     } catch { /* silent */ }
   }, [ticker]);
 
-  // Poll status when training or running
   useEffect(() => {
     fetchStatus();
     const iv = setInterval(() => {
@@ -98,7 +95,9 @@ export default function RLAgentPanel({ selectedStock }) {
   const handleStart = async () => {
     setLoading(true);
     try {
-      await axios.post(`${API}/rl-agent/train`, { algorithm, mode, ticker, timesteps });
+      await axios.post(`${API}/rl-agent/train`, {
+        algorithm: 'DreamerV3', mode, ticker, timesteps,
+      });
       setTimeout(fetchStatus, 800);
     } catch (e) {
       console.error('Start training failed:', e);
@@ -113,7 +112,7 @@ export default function RLAgentPanel({ selectedStock }) {
   };
 
   const handleReset = async () => {
-    if (!window.confirm('Reset agent? All trained models will be deleted.')) return;
+    if (!window.confirm('Reset DreamerV3 agent? All trained models will be deleted.')) return;
     await axios.post(`${API}/rl-agent/reset`);
     setPrediction(null);
     fetchStatus();
@@ -134,7 +133,6 @@ export default function RLAgentPanel({ selectedStock }) {
     try {
       const res = await axios.post(`${API}/rl-agent/rebalance`, { ticker });
       setRebalance(res.data);
-      // Also refresh prediction
       const pred = await axios.post(`${API}/rl-agent/predict`, { ticker });
       setPrediction(pred.data);
     } catch (e) {
@@ -144,22 +142,16 @@ export default function RLAgentPanel({ selectedStock }) {
     }
   };
 
-  const st = status?.status || 'idle';
-  const cfg = STATUS_CONFIG[st] || STATUS_CONFIG.idle;
-
-  // Reward chart data
+  const st    = status?.status || 'idle';
+  const cfg   = STATUS_CONFIG[st] || STATUS_CONFIG.idle;
   const chartData = (status?.episode_rewards || []).map((r, i) => ({ ep: i + 1, reward: r }));
-
-  // Progress %
-  const progress = status?.timesteps_total
+  const progress  = status?.timesteps_total
     ? Math.min(100, (status.timesteps_done / status.timesteps_total) * 100)
     : 0;
-
-  // Weights
-  const weights = status?.last_weights || Array(12).fill(1 / 12);
+  const weights  = status?.last_weights || Array(12).fill(1 / 12);
   const maxWeight = Math.max(...weights);
-
-  const sigCfg = SIGNAL_CONFIG[prediction?.signal] || SIGNAL_CONFIG.HOLD;
+  const sigCfg   = SIGNAL_CONFIG[prediction?.signal] || SIGNAL_CONFIG.HOLD;
+  const kronosOn = prediction?.kronos_active || status?.kronos_active;
 
   return (
     <div className="flex flex-col gap-0 text-sm select-none" data-testid="rl-agent-panel">
@@ -168,9 +160,17 @@ export default function RLAgentPanel({ selectedStock }) {
       <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-[11px] font-black tracking-widest uppercase text-white">
-            RL Agent
+            DreamerV3
           </span>
-          <span className="text-[9px] text-zinc-500 font-mono">PPO / SAC</span>
+          <span className="text-[9px] text-zinc-500 font-mono">World Model RL</span>
+          {kronosOn && (
+            <span
+              className="text-[8px] font-black px-1.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 animate-pulse"
+              data-testid="kronos-active-badge"
+            >
+              KRONOS
+            </span>
+          )}
         </div>
         <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full ${cfg.bg}`}>
           <span
@@ -183,29 +183,24 @@ export default function RLAgentPanel({ selectedStock }) {
         </div>
       </div>
 
+      {/* ── DreamerV3 Config info ── */}
+      <div className="px-4 py-2 border-b border-white/8">
+        <div className="flex gap-2 flex-wrap">
+          {[
+            { label: 'Latent',   val: '64-dim' },
+            { label: 'Horizon',  val: '15 steps' },
+            { label: 'RSSM',     val: 'Prior + Post' },
+          ].map(({ label, val }) => (
+            <div key={label} className="flex items-center gap-1 bg-white/5 rounded px-2 py-1">
+              <span className="text-[9px] text-zinc-500">{label}:</span>
+              <span className="text-[9px] font-mono text-violet-400">{val}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* ── Config ── */}
       <div className="px-4 py-3 border-b border-white/8 space-y-3">
-
-        {/* Algorithm */}
-        <div>
-          <p className="text-[10px] text-zinc-500 mb-1.5 uppercase tracking-widest">Algorithm</p>
-          <div className="flex gap-1.5" data-testid="algo-selector">
-            {['PPO', 'SAC'].map(a => (
-              <button
-                key={a}
-                onClick={() => setAlgorithm(a)}
-                data-testid={`algo-${a.toLowerCase()}`}
-                className={`flex-1 py-1.5 rounded text-[11px] font-bold transition-all ${
-                  algorithm === a
-                    ? 'bg-violet-600 text-white'
-                    : 'bg-white/5 text-zinc-400 hover:bg-white/10'
-                }`}
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Mode */}
         <div>
@@ -306,7 +301,9 @@ export default function RLAgentPanel({ selectedStock }) {
               style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #7c3aed, #06b6d4)' }}
             />
           </div>
-          <div className="flex gap-3 text-[10px]">
+
+          {/* Metrics Row */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
             <div>
               <span className="text-zinc-500">Avg Rew (10): </span>
               <span className={`font-mono font-bold ${(status?.avg_reward_10 || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -319,6 +316,31 @@ export default function RLAgentPanel({ selectedStock }) {
                 {(status?.best_reward === -1e9 ? 0 : status?.best_reward || 0).toFixed(3)}
               </span>
             </div>
+          </div>
+
+          {/* DreamerV3 World Model Losses */}
+          <div className="rounded-lg bg-white/3 border border-white/5 px-2.5 py-2 space-y-1.5">
+            <p className="text-[9px] text-zinc-600 uppercase tracking-widest">World Model Losses</p>
+            {[
+              { key: 'wm_loss',     label: 'WM Loss',    color: '#7c3aed' },
+              { key: 'actor_loss',  label: 'Actor',       color: '#06b6d4' },
+              { key: 'critic_loss', label: 'Critic',      color: '#f59e0b' },
+            ].map(({ key, label, color }) => (
+              <div key={key} className="flex items-center justify-between" data-testid={`loss-${key}`}>
+                <span className="text-[9px] text-zinc-500">{label}</span>
+                <span className="text-[9px] font-mono" style={{ color }}>
+                  {(status?.[key] ?? 0).toFixed(5)}
+                </span>
+              </div>
+            ))}
+            {status?.kronos_active && (
+              <div className="flex items-center justify-between border-t border-white/5 pt-1 mt-1">
+                <span className="text-[9px] text-cyan-400">Kronos Bonus</span>
+                <span className="text-[9px] font-mono text-cyan-300">
+                  +{(status?.kronos_bonus ?? 0).toFixed(4)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -347,11 +369,11 @@ export default function RLAgentPanel({ selectedStock }) {
       {/* ── Strategy Weight Heatmap ── */}
       <div className="px-4 py-3 border-b border-white/8">
         <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2.5">
-          Strategy Weights (RL Optimized)
+          Strategy Weights (DreamerV3 Optimized)
         </p>
         <div className="space-y-1.5" data-testid="strategy-weights">
           {STRATEGY_NAMES.map((name, i) => {
-            const w = weights[i] || 0;
+            const w   = weights[i] || 0;
             const pct = maxWeight > 0 ? (w / maxWeight) * 100 : 0;
             return (
               <div key={name} className="flex items-center gap-2">
@@ -377,7 +399,7 @@ export default function RLAgentPanel({ selectedStock }) {
       {/* ── Current Signal ── */}
       <div className="px-4 py-3">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-widest">RL Signal</p>
+          <p className="text-[10px] text-zinc-500 uppercase tracking-widest">DreamerV3 Signal</p>
           <button
             onClick={handlePredict}
             disabled={loading}
@@ -401,9 +423,16 @@ export default function RLAgentPanel({ selectedStock }) {
               >
                 {prediction.signal}
               </span>
-              <span className="text-[10px] font-mono text-zinc-400">
-                {prediction.confidence}% conf
-              </span>
+              <div className="flex items-center gap-2">
+                {prediction.kronos_active && (
+                  <span className="text-[8px] text-cyan-400 font-mono bg-cyan-500/10 px-1.5 py-0.5 rounded-full border border-cyan-500/20">
+                    Kronos guided
+                  </span>
+                )}
+                <span className="text-[10px] font-mono text-zinc-400">
+                  {prediction.confidence}% conf
+                </span>
+              </div>
             </div>
             <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mb-2">
               <div
@@ -411,27 +440,36 @@ export default function RLAgentPanel({ selectedStock }) {
                 style={{ width: `${prediction.confidence}%`, backgroundColor: sigCfg.color }}
               />
             </div>
-            <div className="flex justify-between text-[10px]">
-              <span className="text-zinc-500">Episode Return</span>
-              <span className={`font-mono ${prediction.total_return >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {(prediction.total_return * 100).toFixed(2)}%
-              </span>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
+              <div>
+                <span className="text-zinc-500">Episode Return: </span>
+                <span className={`font-mono ${prediction.total_return >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {(prediction.total_return * 100).toFixed(2)}%
+                </span>
+              </div>
+              {prediction.wm_loss !== undefined && (
+                <div>
+                  <span className="text-zinc-500">WM Loss: </span>
+                  <span className="font-mono text-violet-400">
+                    {prediction.wm_loss.toFixed(4)}
+                  </span>
+                </div>
+              )}
             </div>
             {prediction.message && (
-              <p className="text-[9px] text-zinc-600 mt-1 font-mono">{prediction.message}</p>
+              <p className="text-[9px] text-zinc-600 mt-1.5 font-mono truncate">{prediction.message}</p>
             )}
           </div>
         ) : (
           <div className="rounded-lg border border-white/8 bg-white/3 p-3 text-center">
             <p className="text-[11px] text-zinc-600">
               {st === 'idle'
-                ? 'Configure and start training to get RL-powered signals'
+                ? 'Configure and start training to get DreamerV3-powered signals'
                 : 'Training in progress — signal will appear after first episode'}
             </p>
           </div>
         )}
 
-        {/* Training error */}
         {status?.error && (
           <div className="mt-2 rounded border border-red-500/30 bg-red-900/20 p-2">
             <p className="text-[10px] text-red-400">{status.error}</p>
@@ -441,7 +479,6 @@ export default function RLAgentPanel({ selectedStock }) {
 
       {/* ── AI Rebalance ── */}
       <div className="px-4 py-3 border-t border-white/8">
-        {/* Button */}
         <button
           onClick={handleRebalance}
           disabled={rebalancing || st === 'idle'}
@@ -457,17 +494,13 @@ export default function RLAgentPanel({ selectedStock }) {
           {rebalancing ? (
             <span className="flex items-center justify-center gap-2">
               <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-              Rebalancing…
+              Rebalancing...
             </span>
           ) : (
-            <span className="flex items-center justify-center gap-1.5">
-              <span className="text-base">⚡</span>
-              AI Rebalance
-            </span>
+            'AI Rebalance'
           )}
         </button>
 
-        {/* Rebalance Result */}
         {rebalance && (
           <div className="mt-3 space-y-2" data-testid="rebalance-result">
             {rebalance.success === false ? (
@@ -476,7 +509,6 @@ export default function RLAgentPanel({ selectedStock }) {
               </div>
             ) : (
               <>
-                {/* Confidence Score — Hero */}
                 <div
                   className="rounded-xl border border-violet-500/30 bg-gradient-to-br from-violet-900/40 to-cyan-900/20 p-3"
                   data-testid="rebalance-confidence"
@@ -488,7 +520,6 @@ export default function RLAgentPanel({ selectedStock }) {
                     </span>
                   </div>
 
-                  {/* Circular-style confidence display */}
                   <div className="flex items-center gap-4">
                     <div className="relative w-16 h-16 shrink-0">
                       <svg viewBox="0 0 60 60" className="w-full h-full -rotate-90">
@@ -530,7 +561,6 @@ export default function RLAgentPanel({ selectedStock }) {
                     </div>
                   </div>
 
-                  {/* Confidence bar */}
                   <div className="mt-2 w-full h-1 bg-white/10 rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full transition-all duration-1000"
@@ -542,7 +572,6 @@ export default function RLAgentPanel({ selectedStock }) {
                   </div>
                 </div>
 
-                {/* Weight Changes — delta indicators */}
                 {rebalance.changes?.length > 0 && (
                   <div className="rounded-xl border border-white/8 bg-white/3 p-3">
                     <p className="text-[9px] text-zinc-500 uppercase tracking-widest mb-2">
@@ -551,7 +580,7 @@ export default function RLAgentPanel({ selectedStock }) {
                     <div className="space-y-1.5 max-h-48 overflow-y-auto" data-testid="weight-changes">
                       {rebalance.changes
                         .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-                        .map((ch, i) => (
+                        .map(ch => (
                           <div key={ch.strategy} className="flex items-center gap-2">
                             <div
                               className="w-1.5 h-1.5 rounded-full shrink-0"
@@ -580,7 +609,7 @@ export default function RLAgentPanel({ selectedStock }) {
 
         {st === 'idle' && (
           <p className="text-[9px] text-zinc-600 text-center mt-1.5">
-            Train the agent first to enable AI Rebalance
+            Train DreamerV3 first to enable AI Rebalance
           </p>
         )}
       </div>

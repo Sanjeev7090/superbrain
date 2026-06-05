@@ -1,16 +1,16 @@
-"""FastAPI router for RL Agent endpoints."""
+"""FastAPI router for RL Agent endpoints — powered by DreamerV3."""
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-from . import rl_trainer
+from . import dreamer_trainer as rl_trainer
 
 rl_router = APIRouter(prefix="/api/rl-agent", tags=["RL Agent"])
 
 
 class TrainRequest(BaseModel):
-    algorithm:  str = "PPO"          # PPO | SAC
+    algorithm:  str = "DreamerV3"    # always DreamerV3 (legacy PPO/SAC field kept for API compat)
     mode:       str = "historical"   # historical | live | hybrid
     ticker:     str = "RELIANCE.NS"
     timesteps:  int = 50_000
