@@ -37,10 +37,11 @@ MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 # ─── Architecture constants ───────────────────────────────────────────────────
-STATE_DIM  = 38   # TradingEnv observation dims
-ACTION_DIM = 16   # TradingEnv action dims
-LATENT_DIM = 64   # DreamerV3 latent representation
-HIDDEN_DIM = 256  # MLP hidden size
+STATE_DIM   = 38    # TradingEnv observation dims
+ACTION_DIM  = 16    # TradingEnv action dims
+LATENT_DIM  = 128   # DreamerV3 latent representation (↑ from 64 — richer market state)
+HIDDEN_DIM  = 512   # MLP hidden size              (↑ from 256 — deeper feature extraction)
+OBS_ENC_DIM = 128   # Obs encoder bottleneck        (new — proper DreamerV3 encoding)
 
 STRATEGY_NAMES = [
     "Godzilla TTE", "SMC", "MiroFish", "Explosive Volume",
@@ -98,6 +99,24 @@ def get_state() -> Dict:
 
 # ─── DreamerV3 Components ─────────────────────────────────────────────────────
 
+class ObsEncoder(nn.Module):
+    """
+    Encodes raw observations into a fixed-dim embedding before the RSSM.
+    Proper DreamerV3 always separates raw obs encoding from latent dynamics.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(STATE_DIM, HIDDEN_DIM),  nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, OBS_ENC_DIM),
+        )
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(obs)
+
+
 class RSSM(nn.Module):
     """Recurrent State Space Model — core of DreamerV3 world model."""
 
@@ -106,11 +125,13 @@ class RSSM(nn.Module):
         # Prior: p(z_t | z_{t-1}, a_{t-1})
         self.prior_net = nn.Sequential(
             nn.Linear(LATENT_DIM + ACTION_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),               nn.SiLU(),
             nn.Linear(HIDDEN_DIM, LATENT_DIM * 2),
         )
-        # Posterior: q(z_t | z_{t-1}, o_t)
+        # Posterior: q(z_t | z_{t-1}, enc(o_t))   — uses encoded obs
         self.posterior_net = nn.Sequential(
-            nn.Linear(LATENT_DIM + STATE_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(LATENT_DIM + OBS_ENC_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),                 nn.SiLU(),
             nn.Linear(HIDDEN_DIM, LATENT_DIM * 2),
         )
 
@@ -128,9 +149,10 @@ class RSSM(nn.Module):
         return dist.rsample(), dist
 
     def compute_posterior(
-        self, prev_latent: torch.Tensor, obs: torch.Tensor
+        self, prev_latent: torch.Tensor, obs_enc: torch.Tensor
     ) -> Tuple[torch.Tensor, Normal]:
-        h    = torch.cat([prev_latent, obs], dim=-1)
+        """Takes encoded obs (OBS_ENC_DIM), not raw obs."""
+        h    = torch.cat([prev_latent, obs_enc], dim=-1)
         dist = self._to_dist(self.posterior_net(h))
         return dist.rsample(), dist
 
@@ -140,8 +162,8 @@ class RewardPredictor(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(LATENT_DIM, HIDDEN_DIM), nn.SiLU(),
-            nn.Linear(HIDDEN_DIM, 64),         nn.SiLU(),
-            nn.Linear(64, 1),
+            nn.Linear(HIDDEN_DIM, 128),        nn.SiLU(),
+            nn.Linear(128, 1),
         )
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -155,6 +177,7 @@ class Actor(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(LATENT_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.SiLU(),
             nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.SiLU(),
             nn.Linear(HIDDEN_DIM, ACTION_DIM * 2),
         )
@@ -181,6 +204,7 @@ class Critic(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(LATENT_DIM, HIDDEN_DIM), nn.SiLU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.SiLU(),
             nn.Linear(HIDDEN_DIM, HIDDEN_DIM), nn.SiLU(),
             nn.Linear(HIDDEN_DIM, 1),
         )
@@ -223,7 +247,7 @@ class DreamerV3Agent:
     """
     Full DreamerV3 training loop:
       1. Collect real transitions → replay buffer
-      2. Train world model  (RSSM posterior + reward predictor, KL vs prior)
+      2. Train world model  (ObsEncoder + RSSM posterior + reward predictor, KL vs prior)
       3. Imagine H-step rollouts from current latents
       4. Optimize actor (maximize λ-return) and critic (match λ-return)
     """
@@ -233,8 +257,9 @@ class DreamerV3Agent:
         lr:       float = 3e-4,
         gamma:    float = 0.99,
         lambda_:  float = 0.95,
-        horizon:  int   = 15,
+        horizon:  int   = 20,      # ↑ from 15 — captures longer market cycles (≈1 trading month)
     ):
+        self.encoder      = ObsEncoder()
         self.rssm         = RSSM()
         self.reward_pred  = RewardPredictor()
         self.actor        = Actor()
@@ -243,7 +268,8 @@ class DreamerV3Agent:
         self.target_critic.load_state_dict(self.critic.state_dict())
 
         wm_params = (
-            list(self.rssm.parameters())
+            list(self.encoder.parameters())
+            + list(self.rssm.parameters())
             + list(self.reward_pred.parameters())
         )
         self.wm_opt     = optim.AdamW(wm_params, lr=lr)
@@ -259,11 +285,18 @@ class DreamerV3Agent:
     def _zero_lat(self, batch_size: int) -> torch.Tensor:
         return torch.zeros(batch_size, LATENT_DIM)
 
-    def act(self, obs: np.ndarray) -> np.ndarray:
+    def act(self, obs: np.ndarray, deterministic: bool = False) -> np.ndarray:
         obs_t = torch.FloatTensor(obs).unsqueeze(0)
         with torch.no_grad():
-            z, _ = self.rssm.compute_posterior(self._zero_lat(1), obs_t)
-            a, _ = self.actor(z)
+            enc      = self.encoder(obs_t)
+            # Use distribution mean for deterministic inference (rebalance/predict)
+            z_dist   = self.rssm._to_dist(self.rssm.posterior_net(
+                torch.cat([self._zero_lat(1), enc], dim=-1)
+            ))
+            z        = z_dist.mean if deterministic else z_dist.rsample()
+            a_params = self.actor.net(z)
+            a_mean, a_log_std = torch.chunk(a_params, 2, dim=-1)
+            a        = torch.tanh(a_mean) if deterministic else self.actor(z)[0]
         return a.squeeze(0).cpu().numpy()
 
     # ---- world model update ----
@@ -273,23 +306,25 @@ class DreamerV3Agent:
         B  = obs.shape[0]
         z0 = self._zero_lat(B)
 
-        z_post, post_dist = self.rssm.compute_posterior(z0, obs)
+        enc_obs = self.encoder(obs)                              # (B, OBS_ENC_DIM)
+        z_post, post_dist = self.rssm.compute_posterior(z0, enc_obs)
         _, prior_dist      = self.rssm.compute_prior(z0, act)
 
         # Reward reconstruction
         rew_loss = nn.MSELoss()(self.reward_pred(z_post), rew)
 
-        # KL(posterior || prior)
+        # KL(posterior || prior) — free-bits 0.1 nats
         kl_loss = torch.distributions.kl_divergence(
             post_dist, prior_dist
-        ).mean().clamp(min=0.0)
+        ).mean().clamp(min=0.1)
 
         loss = rew_loss + 0.5 * kl_loss
 
         self.wm_opt.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(
-            list(self.rssm.parameters())
+            list(self.encoder.parameters())
+            + list(self.rssm.parameters())
             + list(self.reward_pred.parameters()),
             max_norm=10.0,
         )
@@ -306,7 +341,8 @@ class DreamerV3Agent:
         z0 = self._zero_lat(B)
 
         with torch.no_grad():
-            start_z, _ = self.rssm.compute_posterior(z0, obs)
+            enc_obs   = self.encoder(obs)
+            start_z, _ = self.rssm.compute_posterior(z0, enc_obs)
 
         # Imagined rollout
         latents, rewards, values, log_probs = [], [], [], []
@@ -372,16 +408,28 @@ class DreamerV3Agent:
 
     def save(self, path: str):
         torch.save({
+            "encoder":       self.encoder.state_dict(),
             "rssm":          self.rssm.state_dict(),
             "reward_pred":   self.reward_pred.state_dict(),
             "actor":         self.actor.state_dict(),
             "critic":        self.critic.state_dict(),
             "target_critic": self.target_critic.state_dict(),
+            # store dims so load can validate architecture
+            "latent_dim":    LATENT_DIM,
+            "hidden_dim":    HIDDEN_DIM,
+            "horizon":       self.horizon,
         }, path)
         logger.info("DreamerV3 model saved → %s", path)
 
     def load(self, path: str):
         ckpt = torch.load(path, map_location="cpu", weights_only=True)
+        # Validate architecture compatibility
+        if ckpt.get("latent_dim", LATENT_DIM) != LATENT_DIM:
+            raise ValueError(
+                f"Saved model latent_dim={ckpt['latent_dim']} "
+                f"!= current LATENT_DIM={LATENT_DIM}. Delete model and retrain."
+            )
+        self.encoder.load_state_dict(ckpt["encoder"])
         self.rssm.load_state_dict(ckpt["rssm"])
         self.reward_pred.load_state_dict(ckpt["reward_pred"])
         self.actor.load_state_dict(ckpt["actor"])
@@ -762,7 +810,7 @@ def rebalance(ticker: str) -> Dict:
 
         env  = TradingEnv(ticker=ticker)
         obs, _ = env.reset()
-        action  = agent.act(obs)
+        action  = agent.act(obs, deterministic=True)
 
         # Strategy weights (dims 0-11) via softmax
         raw_w  = np.array(action[:12], dtype=np.float32)

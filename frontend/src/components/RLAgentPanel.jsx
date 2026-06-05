@@ -187,9 +187,10 @@ export default function RLAgentPanel({ selectedStock }) {
       <div className="px-4 py-2 border-b border-white/8">
         <div className="flex gap-2 flex-wrap">
           {[
-            { label: 'Latent',   val: '64-dim' },
-            { label: 'Horizon',  val: '15 steps' },
-            { label: 'RSSM',     val: 'Prior + Post' },
+            { label: 'Latent',   val: '128-dim' },
+            { label: 'Horizon',  val: '20 steps' },
+            { label: 'Hidden',   val: '512-wide' },
+            { label: 'RSSM',     val: 'Enc + Prior + Post' },
           ].map(({ label, val }) => (
             <div key={label} className="flex items-center gap-1 bg-white/5 rounded px-2 py-1">
               <span className="text-[9px] text-zinc-500">{label}:</span>
