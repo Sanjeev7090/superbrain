@@ -14,10 +14,12 @@ const TABS = [
 function useThreeCanvas(canvasRef, buildScene, deps) {
   useEffect(() => {
     if (!canvasRef.current) return;
-    const W = canvasRef.current.clientWidth  || 800;
-    const H = canvasRef.current.clientHeight || 500;
+    // Capture ref at effect start so cleanup always uses same element
+    const canvasEl = canvasRef.current;
+    const W = canvasEl.clientWidth  || 800;
+    const H = canvasEl.clientHeight || 500;
 
-    const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, antialias: true, alpha: true });
+    const renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, alpha: true });
     renderer.setSize(W, H);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -46,9 +48,10 @@ function useThreeCanvas(canvasRef, buildScene, deps) {
       prevX = e.clientX; prevY = e.clientY;
     };
     const onUp = () => { isDragging = false; };
-    canvasRef.current.addEventListener('mousedown', onDown);
-    canvasRef.current.addEventListener('mousemove', onMove);
+    canvasEl.addEventListener('mousedown', onDown);
+    canvasEl.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
+    // (canvasEl already captured above)
 
     let raf;
     const loop = () => {
@@ -65,9 +68,9 @@ function useThreeCanvas(canvasRef, buildScene, deps) {
     loop();
 
     const handleResize = () => {
-      if (!canvasRef.current) return;
-      const w = canvasRef.current.clientWidth;
-      const h = canvasRef.current.clientHeight;
+      if (!canvasEl) return;
+      const w = canvasEl.clientWidth;
+      const h = canvasEl.clientHeight;
       renderer.setSize(w, h);
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
@@ -78,9 +81,9 @@ function useThreeCanvas(canvasRef, buildScene, deps) {
       cancelAnimationFrame(raf);
       window.removeEventListener('mouseup', onUp);
       window.removeEventListener('resize', handleResize);
-      if (canvasRef.current) {
-        canvasRef.current.removeEventListener('mousedown', onDown);
-        canvasRef.current.removeEventListener('mousemove', onMove);
+      if (canvasEl) {
+        canvasEl.removeEventListener('mousedown', onDown);
+        canvasEl.removeEventListener('mousemove', onMove);
       }
       renderer.dispose();
     };

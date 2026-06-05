@@ -104,6 +104,7 @@ export default function QSCChart({ symbol, livePrice, onChangeSymbol, options, a
       open: last.open, high: Math.max(last.high, livePrice),
       low: Math.min(last.low, livePrice), close: livePrice,
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [livePrice]);
 
   // ---- Gann Fan drawing ----

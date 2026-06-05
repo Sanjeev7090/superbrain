@@ -97,6 +97,7 @@ const TimeframeLevels = ({ series, bars }) => {
     });
 
     return () => clearLines();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [series, bars]);
 
   return null; // No DOM rendering

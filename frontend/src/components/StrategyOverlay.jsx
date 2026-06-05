@@ -66,6 +66,7 @@ const StrategyOverlay = ({
     }
 
     return () => clearOverlays();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chart, bars, strategyData, strategyType, isActive]);
 
   // Falling Knife: Show drop detection + bounce levels

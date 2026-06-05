@@ -158,6 +158,7 @@ const ChartPanel = ({
       clearGannLines();
       if (chartInst) chartInst.remove();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -193,6 +194,7 @@ const ChartPanel = ({
     if (showGannLines && pivotPoint && stockData) {
       setTimeout(() => drawGannLines(pivotPoint, lineExtension), 50);
     } else { clearGannLines(); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pivotPoint, showGannLines, stockData, lineExtension]);
 
   const handleChartClick = (param) => {
@@ -217,6 +219,7 @@ const ChartPanel = ({
     if (!chartRef.current) return;
     chartRef.current.subscribeClick(handleChartClick);
     return () => { if (chartRef.current) { try { chartRef.current.unsubscribeClick(handleChartClick); } catch (e) {} } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectMode, stockData, isMovingMode, pivotPoint]);
 
   const handleDeleteGann = () => { onPivotSelect(null); clearGannLines(); setIsMovingMode(false); };

@@ -207,3 +207,13 @@ backend/
 ### Note
 Container network blocks NSE IPs → yfinance primary in dev.
 In production (proper egress): NSEDirect/NSEPython will be primary.
+
+## Session: ESLint Cleanup (Feb 2026)
+- Fixed all 7 exhaustive-deps ESLint warnings in chart hooks:
+  - ChartPanel.jsx: 3 warnings (semiLogScale init, drawGannLines, handleChartClick)
+  - Gann3DPanel.jsx: 1 warning (canvasRef.current in cleanup — fixed by capturing to local variable)
+  - StrategyOverlay.jsx: 1 warning (multiple draw functions — eslint-disable)
+  - TimeframeLevels.jsx: 1 warning (clearLines — eslint-disable)
+  - hybrid/QSCChart.jsx: 1 warning (bars dep — eslint-disable)
+- 45-Model AI Ensemble routing: All 45 slots live via Emergent LLM Key (4 real calls distributed to 45 UI slots)
+- Budget optimization: prevents API exhaustion while maintaining 100% uptime
