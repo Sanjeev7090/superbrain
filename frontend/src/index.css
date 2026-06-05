@@ -4,7 +4,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ================================================================
+   iOS HIG TYPOGRAPHY SYSTEM — CSS Custom Properties
+   Source: Apple Human Interface Guidelines
+   ================================================================
+   Large Title   : 34pt / 41pt lh  → --fs-large-title
+   Section Header: 22–28pt         → --fs-section-header / --fs-section-header-lg
+   Body Primary  : 17pt / 22pt lh  → --fs-body
+   Body Secondary: 15pt / 20pt lh  → --fs-subhead
+   Button Text   : 17pt Semibold   → --fs-body + font-weight:600
+   Caption 1     : 12pt / 16pt lh  → --fs-caption1
+   Caption 2     : 11pt / 13pt lh  → --fs-caption2
+   ================================================================ */
 :root {
+  /* Font sizes */
+  --fs-large-title:        34px;
+  --fs-section-header-lg:  28px;
+  --fs-section-header:     22px;
+  --fs-title3:             20px;
+  --fs-body:               17px;
+  --fs-subhead:            15px;
+  --fs-caption1:           12px;
+  --fs-caption2:           11px;
+
+  /* Line heights */
+  --lh-large-title:        41px;
+  --lh-section-header-lg:  34px;
+  --lh-section-header:     28px;
+  --lh-title3:             25px;
+  --lh-body:               22px;
+  --lh-subhead:            20px;
+  --lh-caption1:           16px;
+  --lh-caption2:           13px;
+
+  /* Letter spacing */
+  --ls-large-title:       -0.035em;
+  --ls-section-header:    -0.025em;
+  --ls-body:              -0.015em;
+  --ls-subhead:           -0.008em;
+  --ls-caption:            0.010em;
+
+  /* App colors */
   --bg-app: #0A0A0A;
   --bg-panel: #141414;
   --bg-panel-hover: #1C1C1C;
@@ -412,4 +452,121 @@ html:not(.dark) .hover\:text-white:hover { color: #0F172A !important; }
 html.dark,
 html:not(.dark) {
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+
+
+/* ================================================================
+   iOS HIG SEMANTIC UTILITY CLASSES
+   Use these in components for consistent iOS-grade typography.
+   ================================================================ */
+
+/* Large Title — 34pt / 41lh */
+.text-ios-large-title {
+  font-size: var(--fs-large-title);
+  line-height: var(--lh-large-title);
+  letter-spacing: var(--ls-large-title);
+  font-weight: 700;
+}
+
+/* Section Header large — 28pt */
+.text-ios-header-lg {
+  font-size: var(--fs-section-header-lg);
+  line-height: var(--lh-section-header-lg);
+  letter-spacing: var(--ls-section-header);
+  font-weight: 600;
+}
+
+/* Section Header — 22pt */
+.text-ios-header {
+  font-size: var(--fs-section-header);
+  line-height: var(--lh-section-header);
+  letter-spacing: var(--ls-section-header);
+  font-weight: 600;
+}
+
+/* Title 3 — 20pt */
+.text-ios-title3 {
+  font-size: var(--fs-title3);
+  line-height: var(--lh-title3);
+  letter-spacing: -0.02em;
+  font-weight: 500;
+}
+
+/* Body Primary — 17pt */
+.text-ios-body {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+  font-weight: 400;
+}
+
+/* Button — 17pt Semibold */
+.text-ios-button {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+  font-weight: 600;
+}
+
+/* Body Secondary / Subhead — 15pt */
+.text-ios-subhead {
+  font-size: var(--fs-subhead);
+  line-height: var(--lh-subhead);
+  letter-spacing: var(--ls-subhead);
+  font-weight: 400;
+}
+
+/* Caption 1 — 12pt */
+.text-ios-caption1 {
+  font-size: var(--fs-caption1);
+  line-height: var(--lh-caption1);
+  letter-spacing: var(--ls-caption);
+  font-weight: 400;
+}
+
+/* Caption 2 — 11pt */
+.text-ios-caption2 {
+  font-size: var(--fs-caption2);
+  line-height: var(--lh-caption2);
+  letter-spacing: var(--ls-caption);
+  font-weight: 400;
+}
+
+/* ── Apply iOS body sizing globally to standard elements ────── */
+body {
+  font-size: var(--fs-body);          /* 17pt body primary */
+  line-height: var(--lh-body);
+  letter-spacing: var(--ls-body);
+}
+
+p, li, td, th {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+/* Buttons get 17pt Semibold per iOS HIG */
+button {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  letter-spacing: var(--ls-body);
+}
+
+/* Input fields — Body Primary */
+input, select, textarea {
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+
+/* Headings mapped to iOS scale */
+h1 { font-size: var(--fs-large-title);       line-height: var(--lh-large-title);       letter-spacing: var(--ls-large-title); }
+h2 { font-size: var(--fs-section-header-lg); line-height: var(--lh-section-header-lg); letter-spacing: var(--ls-section-header); }
+h3 { font-size: var(--fs-section-header);    line-height: var(--lh-section-header);    letter-spacing: var(--ls-section-header); }
+h4 { font-size: var(--fs-title3);            line-height: var(--lh-title3);            letter-spacing: -0.02em; }
+h5 { font-size: var(--fs-body);              line-height: var(--lh-body);              letter-spacing: var(--ls-body); }
+h6 { font-size: var(--fs-subhead);           line-height: var(--lh-subhead);           letter-spacing: var(--ls-subhead); }
+
+/* ── Light theme overrides for typography ───────────────────── */
+html:not(.dark) body {
+  color: var(--text-primary);
 }
