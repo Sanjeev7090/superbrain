@@ -8,7 +8,10 @@ import TimeframeLevels from './TimeframeLevels';
 import { useTheme } from '../context/ThemeContext';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const VP_WIDTH = 88;
+const VP_WIDTH  = 100;   // 84px bars + 6px gap + 10px heatmap
+const VP_BARS_W = 84;    // actual bar area width
+const HEAT_X    = 90;    // heatmap column start
+const HEAT_W    = 10;    // heatmap column width
 
 const fmtVol = n => {
   if (!n && n !== 0) return '0';
@@ -95,18 +98,24 @@ const ChartPanel = ({
     ctx.save();
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, VP_WIDTH, H);
-    const bins = d.vp_bins;
-    const maxVol = Math.max(...bins.map(b => b.total_vol)) || 1;
-    const rowH = Math.max(3, (H / bins.length) * 0.72);
+
+    const bins    = d.vp_bins;
+    const maxVol  = Math.max(...bins.map(b => b.total_vol)) || 1;
+    const rowH    = Math.max(3, (H / bins.length) * 0.72);
+    const pocPrice = bins.find(b => b.is_poc)?.price_mid ?? bins[Math.floor(bins.length / 2)].price_mid;
+    const maxDist  = Math.max(...bins.map(b => Math.abs(b.price_mid - pocPrice))) || 1;
+
+    // ── 1. Buy / Sell bars ─────────────────────────────────────────
     bins.forEach(bin => {
       const y = series.priceToCoordinate(bin.price_mid);
       if (y == null || y < -rowH || y > H + rowH) return;
-      const buyW = (bin.buy_vol / maxVol) * (VP_WIDTH - 4);
-      const sellW = (bin.sell_vol / maxVol) * (VP_WIDTH - 4);
-      const half = rowH / 2;
+      const buyW  = (bin.buy_vol  / maxVol) * VP_BARS_W;
+      const sellW = (bin.sell_vol / maxVol) * VP_BARS_W;
+      const half  = rowH / 2;
+
       if (bin.in_value_area) {
         ctx.fillStyle = 'rgba(255,255,255,0.04)';
-        ctx.fillRect(0, y - rowH, VP_WIDTH, rowH * 2);
+        ctx.fillRect(0, y - rowH, VP_BARS_W + 4, rowH * 2);
       }
       if (buyW > 0) {
         ctx.fillStyle = bin.in_value_area ? 'rgba(0,230,118,0.82)' : 'rgba(0,230,118,0.38)';
@@ -120,13 +129,15 @@ const ChartPanel = ({
         ctx.strokeStyle = 'rgba(255,107,0,0.95)';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([3, 2]);
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(VP_WIDTH, y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(VP_BARS_W + 4, y); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = '#FF6B00';
         ctx.font = 'bold 7px monospace';
-        ctx.fillText('◆', VP_WIDTH - 11, y - 2);
+        ctx.fillText('◆', VP_BARS_W - 10, y - 2);
       }
     });
+
+    // ── 2. VAH / VAL edge labels ───────────────────────────────────
     const markEdgeLabel = (price, label, color) => {
       if (!price) return;
       const y = series.priceToCoordinate(price);
@@ -138,7 +149,45 @@ const ChartPanel = ({
     markEdgeLabel(d.vah_price, 'VAH', '#A855F7');
     markEdgeLabel(d.val_price, 'VAL', '#06B6D4');
 
-    // Hover highlight
+    // ── 3. Heatmap column ─────────────────────────────────────────
+    // Thin vertical separator
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(HEAT_X - 2, 0); ctx.lineTo(HEAT_X - 2, H); ctx.stroke();
+
+    bins.forEach(bin => {
+      const y = series.priceToCoordinate(bin.price_mid);
+      if (y == null || y < -rowH || y > H + rowH) return;
+
+      const volScore  = bin.total_vol / maxVol;
+      const distScore = 1 - Math.abs(bin.price_mid - pocPrice) / maxDist;
+      const score     = 0.55 * volScore + 0.45 * distScore;
+
+      // Color ramp: navy → blue → teal → yellow → orange → red
+      let r, g, b, a;
+      if      (score < 0.20) { r=20;  g=30;  b=138; a=0.55 + score * 1.5; }
+      else if (score < 0.38) { r=3;   g=105; b=180; a=0.65 + score * 0.8; }
+      else if (score < 0.54) { r=5;   g=160; b=110; a=0.72 + score * 0.5; }
+      else if (score < 0.70) { r=200; g=160; b=8;   a=0.80 + score * 0.25; }
+      else if (score < 0.85) { r=234; g=88;  b=12;  a=0.88 + score * 0.12; }
+      else                   { r=220; g=38;  b=38;  a=1.0; }
+
+      ctx.fillStyle = `rgba(${r},${g},${b},${Math.min(1, a)})`;
+      ctx.fillRect(HEAT_X, y - rowH, HEAT_W, rowH * 2);
+
+      // POC band — brightest white-hot line
+      if (bin.is_poc) {
+        ctx.fillStyle = 'rgba(255,255,200,0.95)';
+        ctx.fillRect(HEAT_X, y - 1.5, HEAT_W, 3);
+        // Tiny "H" label
+        ctx.fillStyle = '#FF6B00';
+        ctx.font = 'bold 6px monospace';
+        ctx.fillText('H', HEAT_X + 2, y - 3);
+      }
+    });
+
+    // ── 4. Hover highlight ────────────────────────────────────────
     const hoverY = vpHoverYRef.current;
     if (hoverY !== null) {
       let hBin = null, hMin = Infinity;
