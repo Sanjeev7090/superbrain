@@ -169,7 +169,7 @@ function OptionsNetwork({ symbol }) {
       .attr('text-anchor', 'middle').attr('dy', '0.35em')
       .attr('fill', 'white').attr('font-size', d => d.type === 'atm' ? 10 : 8)
       .attr('font-weight', d => d.type === 'atm' ? 'bold' : 'normal')
-      .text(d => d.type === 'atm' ? 'ATM' : d.label);
+      .text(d => d.type === 'atm' ? 'OTM' : d.label);
 
     node.append('title').text(d => `${d.label}\nOI: ${d.oi?.toLocaleString()}\nVol: ${d.volume?.toLocaleString()}`);
 
@@ -200,7 +200,7 @@ function OptionsNetwork({ symbol }) {
       <svg ref={svgRef} width="100%" height={420} className="bg-[#0f0f0f] rounded-lg" />
       {/* Legend */}
       <div className="flex gap-4 mt-2 px-4 text-[10px] text-zinc-500">
-        {[['#10b981','Call OI'],['#ef4444','Put OI'],['#f59e0b','ATM']].map(([c,l]) => (
+        {[['#10b981','Call OI'],['#ef4444','Put OI'],['#f59e0b','OTM']].map(([c,l]) => (
           <div key={l} className="flex items-center gap-1">
             <div className="w-2.5 h-2.5 rounded-full" style={{background:c}} />
             <span>{l}</span>

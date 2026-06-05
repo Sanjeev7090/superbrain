@@ -442,7 +442,7 @@ const TradingDashboard = () => {
     { id: 'strategies', label: 'STRATEGIES'  },
     { id: 'paper',      label: 'PAPER'       },
     { id: 'rlagent',    label: 'RL AGENT'    },
-    { id: 'ensemble',   label: 'AI ENSEMBLE' },
+    { id: 'ensemble',   label: 'AI ASSEMBLE' },
     { id: 'picker',     label: 'PICKER'      },
     { id: 'pece',       label: 'PE-CE OI'    },
   ];

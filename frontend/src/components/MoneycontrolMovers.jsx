@@ -171,7 +171,7 @@ function SignalCard({ stock, rank, onPaperTrade }) {
         <div className="flex items-center gap-1.5 mb-2">
           <TrendUp size={12} className="text-[#00E676]" weight="bold" />
           <span className="text-[10px] font-black text-[#00E676] uppercase tracking-wider">
-            {atm.signal || 'BUY ATM CALL'}
+            {atm.signal || 'BUY OTM CALL'}
           </span>
           {atm.estimated && (
             <span className="text-[8px] text-zinc-600 border border-zinc-700 px-1 rounded">EST</span>
@@ -180,7 +180,7 @@ function SignalCard({ stock, rank, onPaperTrade }) {
 
         <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
           <div>
-            <span className="text-zinc-600">ATM Strike</span>
+            <span className="text-zinc-600">OTM Strike</span>
             <p className="font-mono font-bold text-amber-300">{fmtPrice(atm.atm_strike)}</p>
           </div>
           <div>
@@ -291,7 +291,7 @@ function HistoryRow({ day }) {
               <span className={`font-mono ${pctColor(s.weekly_change_pct)} shrink-0`}>
                 {s.weekly_change_pct >= 0 ? '+' : ''}{s.weekly_change_pct?.toFixed?.(2)}%
               </span>
-              <span className="text-amber-300 font-mono shrink-0">ATM {fmtPrice(s.atm_info?.atm_strike)}</span>
+              <span className="text-amber-300 font-mono shrink-0">OTM {fmtPrice(s.atm_info?.atm_strike)}</span>
               <div className="shrink-0">
                 <PerfBadge perf={s.performance} compact />
               </div>
@@ -369,7 +369,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
         entry:     atm.option_ltp,
         stoploss:  atm.sl_price,
         targets:   [atm.target_price],
-        strategy:  'MC-ATM-CALL',
+        strategy:  'MC-OTM-CALL',
       });
     }
   };
@@ -387,7 +387,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
           <div className="flex items-center gap-2">
             <Lightning size={13} className="text-[#00E676]" weight="fill" />
             <h3 className="text-xs font-black tracking-tight text-zinc-100 uppercase">
-              STOCKS ATM
+              STOCKS OTM
             </h3>
             <span className="text-[9px] text-zinc-600 font-mono">·</span>
             <span className="text-[9px] text-zinc-500 font-mono uppercase tracking-wider">Moneycontrol Movers</span>
@@ -493,7 +493,7 @@ export default function MoneycontrolMovers({ onPaperTrade }) {
             <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg bg-[#00E676]/8 border border-[#00E676]/20">
               <Clock size={10} className="text-[#00E676]" />
               <span className="text-[10px] text-[#00E676] font-bold">
-                ATM Call Signals ready at {data.signals_ready_at || '3:15 PM IST'} — Execute & hold till next morning
+                OTM Call Signals ready at {data.signals_ready_at || '3:15 PM IST'} — Execute & hold till next morning
               </span>
             </div>
           )}

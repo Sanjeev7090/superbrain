@@ -146,7 +146,7 @@ function ConsensusStrip({ counts, total, avgConf, consensus }) {
           >
             {consensus}
           </span>
-          <span className="text-[9px] text-zinc-400">Ensemble Consensus</span>
+          <span className="text-[9px] text-zinc-400">Assemble Consensus</span>
         </div>
         <span className="text-[9px] font-mono text-zinc-400" data-testid="consensus-confidence">
           Avg {avgConf}% confidence
@@ -255,7 +255,7 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
       <div className="px-3 py-2.5 border-b border-zinc-800/80 bg-[#0E0E10] flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[11px] font-black uppercase tracking-[0.15em] text-white">AI ENSEMBLE</div>
+            <div className="text-[11px] font-black uppercase tracking-[0.15em] text-white">AI ASSEMBLE</div>
             <div className="text-[8px] text-zinc-600 mt-0.5">
               {status?.key_configured
                 ? <span className="text-emerald-500">● Emergent Key Active</span>
