@@ -6385,6 +6385,25 @@ async def multi_tf_scanner_scan(request: Request, segment: str = "fo", timeframe
         if not universe:
             # Fallback: high-liquidity F&O subset so the scan still runs
             universe = [s for s in _MTF_UNIVERSE if s["segment"] == "fo"][:25]
+    elif segment == "breakout_15m":
+        # Focused 15-min breakout scanner — Most Active + F&O liquid universe.
+        # Filtering to actual breakout setups happens inside the stream below.
+        try:
+            ma = _fetch_nse_most_active(limit=25)
+        except Exception:
+            ma = []
+        fo = [s for s in _MTF_UNIVERSE if s["segment"] in ("fo", "banknifty", "finnifty")]
+        seen_t: set = set()
+        universe = []
+        for src in (ma, fo):
+            for row in src:
+                t = row.get("ticker")
+                if t and t not in seen_t:
+                    seen_t.add(t)
+                    universe.append(row)
+        # Force 15m timeframe in tf_list (breakout strategy is 15m-focused)
+        if "15m" not in tf_list:
+            tf_list = ["15m"] + tf_list
     else:
         universe = [s for s in _MTF_UNIVERSE if s["segment"] == segment]
 
@@ -6397,6 +6416,7 @@ async def multi_tf_scanner_scan(request: Request, segment: str = "fo", timeframe
         loop    = asyncio.get_event_loop()
         found   = 0
         batch_sz = 12
+        breakout_only = (segment == "breakout_15m")
 
         for batch_start in range(0, total, batch_sz):
             if await request.is_disconnected():
@@ -6414,6 +6434,13 @@ async def multi_tf_scanner_scan(request: Request, segment: str = "fo", timeframe
                 sym = universe[idx]["ticker"]
                 yield f"data: {json.dumps({'type': 'progress', 'current': idx + 1, 'total': total, 'symbol': sym})}\n\n"
                 if result:
+                    # In breakout-only mode, keep ONLY stocks where the 15m
+                    # Breakout strategy actually fired on the 15m timeframe.
+                    if breakout_only:
+                        tf15 = (result.get("tf_signals") or {}).get("15m") or {}
+                        sig_list = tf15.get("signals") or []
+                        if not any("15m Breakout" in s for s in sig_list):
+                            continue
                     found += 1
                     yield f"data: {json.dumps({'type': 'result', **result})}\n\n"
 

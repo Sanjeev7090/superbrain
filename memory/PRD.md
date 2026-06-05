@@ -247,3 +247,24 @@ In production (proper egress): NSEDirect/NSEPython will be primary.
   - hybrid/QSCChart.jsx: 1 warning (bars dep — eslint-disable)
 - 45-Model AI Ensemble routing: All 45 slots live via Emergent LLM Key (4 real calls distributed to 45 UI slots)
 - Budget optimization: prevents API exhaustion while maintaining 100% uptime
+
+## Session: Most Active + 15m Breakout (Feb 2026)
+### Backend (`/app/backend/server.py`)
+- **`_fetch_nse_most_active(limit=25)`** (~L1090): Hits NSE's `live-analysis-most-active-securities` API for both `index=volume` and `index=value`, interleaves and dedupes by ticker, 5-min cache. Uses existing `_get_nse_session()` (curl_cffi Chrome120 impersonation) to bypass NSE WAF.
+- **`run_mini_breakout(bars)`** (~L4873): Donchian-20 breakout + Volume ≥1.3× avg(20) + bullish/bearish candle in upper/lower 50% of range + EMA20 alignment. SL = entry ± ATR(14)×1.5. Targets = 1R/2R/3R based on risk distance. Returns ("BUY"|"SELL"|"WAIT", {entry, sl, targets}).
+- **`_STRATEGY_WEIGHTS`** (~L5570): Added `"15m Breakout": 10.0` → `_TOTAL_STRATEGY_WEIGHT` now 118.0.
+- **`_mtf_scan_stock`** (~L6094): Strategy list now includes `("15m Breakout", run_mini_breakout)` with confidence=80.
+- **`/api/multi-tf-scanner/scan`** (~L6189):
+  - `segment="most_active"`: dynamic universe = NSE Most Active top 25 (Volume+Value deduped); F&O fallback if NSE unreachable.
+  - `segment="breakout_15m"`: universe = Most Active ∪ F&O/BankNifty/FinNifty deduped (~80 stocks); forces `15m` into tf_list; streams ONLY results where `tf_signals["15m"]["signals"]` contains `"15m Breakout"`.
+- **`GET /api/nse/most-active?limit=N`** (new, ~L6256): Returns deduped Most Active list for UI preview.
+
+### Frontend (`/app/frontend/src/components/MultiTFScannerModal.jsx`)
+- `SEGMENTS` array extended with `{id:'most_active', label:'Most Active', pink}` and `{id:'breakout_15m', label:'15m Breakout', amber}` chips next to existing options.
+- Empty-state hints describe each new segment's behavior.
+- Footer weighted-confluence string now lists `15m Breakout(10%)`.
+
+### Verified end-to-end (live NSE during market)
+- `GET /api/nse/most-active?limit=10` → 200, returned IDEA, BSE, OLAELEC, ZEEL, RELIANCE, GTLINFRA, SBIN, YESBANK, ADANIENT, NETWORK18.
+- `SSE /api/multi-tf-scanner/scan?segment=most_active&timeframes=15m` → universe=25, OLAELEC fired `[Explosive Volume, 15m Breakout, AI Indicator]`.
+- `SSE /api/multi-tf-scanner/scan?segment=breakout_15m&timeframes=15m` → 80 scanned, 6 results (OLAELEC, TCS, ASIANPAINT, NESTLEIND, ADANIPORTS, FEDERALBNK) — all containing `15m Breakout` in 15m signals.
