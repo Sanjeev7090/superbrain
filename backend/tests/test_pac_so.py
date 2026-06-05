@@ -4,7 +4,7 @@ import requests
 import math
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ai-prediction-hub-7.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://predict-smart-5.preview.emergentagent.com").rstrip("/")
 
 
 def _gen_bars(n=60, start=100.0, trend=0.5, vol=1.0):
