@@ -570,3 +570,128 @@ h6 { font-size: var(--fs-subhead);           line-height: var(--lh-subhead);    
 html:not(.dark) body {
   color: var(--text-primary);
 }
+
+/* ================================================================
+   LIQUID GLASS — Apple-style glassmorphism hover effect
+   Dark  : rgba-white tint  +  backdrop-blur  +  scale-rotate
+   Light : rgba-white wash  +  accent glow   +  scale-rotate
+   ================================================================ */
+
+@keyframes liquid-shimmer {
+  0%   { background-position: -220% center; }
+  100% { background-position:  220% center; }
+}
+
+/* ── Brand logo — glass pill on hover ─────────────────────────── */
+.liquid-glass-brand {
+  position: relative;
+  padding: 3px 10px;
+  border-radius: 10px;
+  border: 1.5px solid transparent;
+  transition: all 0.45s cubic-bezier(0.23, 1, 0.32, 1);
+  cursor: default;
+  display: inline-flex;
+  align-items: baseline;
+  overflow: hidden;
+}
+
+/* Shimmer sweep overlay */
+.liquid-glass-brand::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255,255,255,0.11) 50%,
+    transparent 65%
+  );
+  background-size: 250% 100%;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s;
+}
+
+.liquid-glass-brand:hover::after {
+  opacity: 1;
+  animation: liquid-shimmer 1.8s linear infinite;
+}
+
+/* Dark mode */
+.dark .liquid-glass-brand:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 22px 55px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0  rgba(255, 255, 255, 0.18),
+    inset 0 0  40px rgba(255, 255, 255, 0.05);
+  transform: scale(1.07) rotate(2deg);
+}
+
+/* Light mode */
+html:not(.dark) .liquid-glass-brand:hover {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(0, 200, 100, 0.35);
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  box-shadow:
+    0 22px 55px rgba(0, 0, 0, 0.10),
+    inset 0 1px 0  rgba(255, 255, 255, 0.95),
+    inset 0 0  40px rgba(0, 230, 118, 0.10);
+  transform: scale(1.07) rotate(-2deg);
+}
+
+/* ── Action buttons (VISUAL / 3D / HYBRID) ────────────────────── */
+.liquid-glass-btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1) !important;
+}
+
+/* Shimmer sweep on button */
+.liquid-glass-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255,255,255,0.14) 50%,
+    transparent 65%
+  );
+  background-size: 250% 100%;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.liquid-glass-btn:hover::before {
+  opacity: 1;
+  animation: liquid-shimmer 1.5s linear infinite;
+}
+
+/* Dark */
+.dark .liquid-glass-btn:hover {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    0 10px 36px rgba(0, 0, 0, 0.50),
+    inset 0 1px 0  rgba(255, 255, 255, 0.20),
+    inset 0 0  22px rgba(255, 255, 255, 0.06);
+  transform: scale(1.08) translateY(-2px);
+}
+
+/* Light */
+html:not(.dark) .liquid-glass-btn:hover {
+  backdrop-filter: blur(20px) saturate(200%);
+  -webkit-backdrop-filter: blur(20px) saturate(200%);
+  box-shadow:
+    0 10px 36px rgba(0, 0, 0, 0.10),
+    inset 0 1px 0  rgba(255, 255, 255, 0.95),
+    inset 0 0  22px rgba(255, 255, 255, 0.65);
+  transform: scale(1.08) translateY(-2px);
+}

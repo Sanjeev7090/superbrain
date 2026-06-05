@@ -477,7 +477,7 @@ const TradingDashboard = () => {
       {/* Header */}
       <header className="h-12 md:h-14 border-b border-slate-200 dark:border-white/10 flex items-center justify-between px-3 lg:px-6 bg-white/90 dark:bg-[#0A0A0A]/90 backdrop-blur-md z-50 shrink-0 transition-colors duration-200" data-testid="dashboard-header">
         <div className="flex items-center gap-3">
-          <h1 className="text-sm md:text-lg font-black tracking-tighter uppercase" style={{ fontFamily: "'Chivo', sans-serif" }}>
+          <h1 className="liquid-glass-brand text-sm md:text-lg font-black tracking-tighter uppercase" style={{ fontFamily: "'Chivo', sans-serif" }}>
             <span className="text-slate-900 dark:text-white">GANN</span>
             <span className="text-[#00E676] ml-1">TRADER</span>
           </h1>
@@ -531,7 +531,7 @@ const TradingDashboard = () => {
           {/* VISUALIZE BUTTON */}
           <button
             onClick={() => setShowVisualize(true)}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-violet-500/50 text-violet-400 hover:bg-violet-500/15 hover:border-violet-500 px-2.5 py-1.5 rounded transition-all duration-200"
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-violet-500/50 text-violet-400 hover:bg-violet-500/20 hover:border-violet-500 px-2.5 py-1.5 rounded"
             data-testid="visualize-btn"
             title="Heatmaps · Correlation · Options Flow"
           >
@@ -540,7 +540,7 @@ const TradingDashboard = () => {
           {/* 3D CHARTS BUTTON */}
           <button
             onClick={() => setShow3D(true)}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/15 hover:border-cyan-500 px-2.5 py-1.5 rounded transition-all duration-200"
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-cyan-500/50 text-cyan-400 hover:bg-cyan-500/20 hover:border-cyan-500 px-2.5 py-1.5 rounded"
             data-testid="gann3d-btn"
             title="3D Gann · Price Surface · Astro Cycles"
           >
@@ -549,7 +549,7 @@ const TradingDashboard = () => {
           {/* HYBRID MODE BUTTON */}
           <button
             onClick={() => setHybridMode(true)}
-            className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-[#3366FF]/50 text-[#3366FF] hover:bg-[#3366FF]/15 hover:border-[#3366FF] px-2.5 py-1.5 rounded transition-all duration-200"
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-[#3366FF]/50 text-[#3366FF] hover:bg-[#3366FF]/20 hover:border-[#3366FF] px-2.5 py-1.5 rounded"
             data-testid="hybrid-mode-btn"
             title="Switch to QSC Hybrid Mode"
           >

@@ -230,6 +230,14 @@ backend/
 Container network blocks NSE IPs → yfinance primary in dev.
 In production (proper egress): NSEDirect/NSEPython will be primary.
 
+## Session: Liquid Glass UI (Jun 2026)
+- Added Apple-style liquid glass hover effect to header elements
+- `.liquid-glass-brand` on GANN TRADER logo: glass pill + backdrop-blur + scale(1.07) rotate(2deg) on hover
+- `.liquid-glass-light-btn` on VISUAL / 3D / HYBRID buttons: shimmer sweep + blur + scale(1.08) lift on hover  
+- `@keyframes liquid-shimmer`: 250% gradient sweep over element on hover
+- Fully dark/light-mode aware via `.dark` and `html:not(.dark)` selectors
+- Files: `frontend/src/index.css` (CSS classes), `TradingDashboard.jsx` (class applied)
+
 ## Session: ESLint Cleanup (Feb 2026)
 - Fixed all 7 exhaustive-deps ESLint warnings in chart hooks:
   - ChartPanel.jsx: 3 warnings (semiLogScale init, drawGannLines, handleChartClick)
