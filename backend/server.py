@@ -1089,6 +1089,88 @@ def _get_nse_session():
     return s
 
 
+# ── NSE Most Active Equities (Volume + Value combined) ───────────────────────
+_NSE_MOST_ACTIVE_CACHE: Dict[str, Any] = {"data": None, "ts": 0.0}
+
+
+def _fetch_nse_most_active(limit: int = 25) -> List[Dict[str, str]]:
+    """Fetch NSE's Most Active equities by VOLUME and VALUE, dedupe, return top N.
+
+    Uses the established curl_cffi NSE session to bypass NSE's WAF/TLS check.
+    Cached for 5 minutes to avoid hammering NSE.
+
+    Returns: [{"ticker": "RELIANCE.NS", "name": "Reliance Industries", "segment": "most_active"}, ...]
+    """
+    now = _time.time()
+    if _NSE_MOST_ACTIVE_CACHE["data"] and (now - _NSE_MOST_ACTIVE_CACHE["ts"]) < 300:
+        return _NSE_MOST_ACTIVE_CACHE["data"][:limit]
+
+    s = _get_nse_session()
+    endpoints = [
+        ("volume", "https://www.nseindia.com/api/live-analysis-most-active-securities?index=volume"),
+        ("value",  "https://www.nseindia.com/api/live-analysis-most-active-securities?index=value"),
+    ]
+
+    seen: Dict[str, Dict[str, Any]] = {}  # symbol -> meta (interleaved order preserved)
+    order: List[str] = []                  # preserve interleaved insertion order
+
+    # Interleave the two lists so the very top of each list both make it through
+    fetched_lists: Dict[str, List[Dict]] = {}
+    for kind, url in endpoints:
+        try:
+            r = s.get(url, timeout=12)
+            if r.status_code != 200 or len(r.content) < 100:
+                logging.warning(f"NSE most-active {kind} HTTP {r.status_code}")
+                fetched_lists[kind] = []
+                continue
+            try:
+                d = r.json()
+            except Exception:
+                fetched_lists[kind] = []
+                continue
+            # NSE response shape: {"data": [{"symbol": "...", "meta": {...}, "lastPrice": ..}], ...}
+            lst = d.get("data") or d.get("legends") or []
+            fetched_lists[kind] = lst if isinstance(lst, list) else []
+        except Exception as e:
+            logging.warning(f"NSE most-active {kind} failed: {e}")
+            fetched_lists[kind] = []
+
+    vol_list = fetched_lists.get("volume", []) or []
+    val_list = fetched_lists.get("value",  []) or []
+    maxlen = max(len(vol_list), len(val_list))
+
+    for i in range(maxlen):
+        for lst in (vol_list, val_list):
+            if i >= len(lst):
+                continue
+            row = lst[i]
+            if not isinstance(row, dict):
+                continue
+            sym = (row.get("symbol") or "").strip().upper()
+            if not sym or sym in seen:
+                continue
+            meta = row.get("meta") or {}
+            company = (meta.get("companyName") or row.get("symbol") or sym).strip()
+            seen[sym] = {
+                "ticker":  f"{sym}.NS",
+                "name":    company,
+                "segment": "most_active",
+            }
+            order.append(sym)
+
+    out: List[Dict[str, str]] = [seen[sym] for sym in order if sym in seen]
+
+    if out:
+        _NSE_MOST_ACTIVE_CACHE["data"] = out
+        _NSE_MOST_ACTIVE_CACHE["ts"]   = now
+        return out[:limit]
+
+    # Fallback: stale cache if available
+    if _NSE_MOST_ACTIVE_CACHE["data"]:
+        return _NSE_MOST_ACTIVE_CACHE["data"][:limit]
+    return []
+
+
 def _fetch_nse_option_chain(symbol: str, expiry: Optional[str] = None) -> dict:
     """Hit NSE's v3 option-chain API. Requires explicit expiry param.
 
@@ -4870,6 +4952,90 @@ def run_mini_explosive_volume(bars):
         return "WAIT", None
 
 
+def run_mini_breakout(bars):
+    """
+    15-Min Stock Breakout (Donchian-20 + Volume Confirmation + ATR Risk Sizing)
+    Designed for 15m timeframe but works on any TF — robust intraday breakout.
+
+    BUY CONDITIONS (all must hold):
+      1. Close > prior 20-bar high (Donchian-20 upper break)
+      2. Current bar high > prior 20-bar high (intra-bar breakout, not just close)
+      3. Volume on last bar >= 1.3 × 20-bar avg volume
+      4. Last candle bullish: close > open AND close in upper 50% of range
+      5. Recent trend not exhausted (close > EMA20)
+
+    SELL CONDITIONS (mirror, Donchian-20 lower break with bearish confirmation).
+
+    ENTRY : Current close (breakout confirmed)
+    SL    : ATR(14) × 1.5 below (BUY) / above (SELL) the entry
+    TARGETS: 1R, 2R, 3R based on (entry - SL) distance
+    """
+    try:
+        if len(bars) < 25:
+            return "WAIT", None
+
+        closes = [b['close'] for b in bars]
+        highs  = [b['high']  for b in bars]
+        lows   = [b['low']   for b in bars]
+        vols   = [b.get('volume', 0) for b in bars]
+
+        last    = bars[-1]
+        current = closes[-1]
+        bar_rng = last['high'] - last['low']
+        if bar_rng <= 0:
+            return "WAIT", None
+
+        # Donchian-20 channel (using bars [-21:-1] = prior 20 bars, excluding current)
+        prior_high20 = max(highs[-21:-1])
+        prior_low20  = min(lows[-21:-1])
+
+        # Volume filter
+        vol_avg20 = sum(vols[-21:-1]) / 20.0
+        if vol_avg20 <= 0 or vols[-1] < 1.3 * vol_avg20:
+            return "WAIT", None
+
+        # ATR for risk sizing
+        atr = _smc_compute_atr(highs, lows, closes, 14)
+        if atr <= 0:
+            atr = bar_rng  # fallback
+
+        ema20 = calc_ema(closes, 20)
+
+        close_pos = (last['close'] - last['low']) / bar_rng  # 0..1
+
+        # ── BULLISH BREAKOUT ───────────────────────────────────────────────
+        bullish_candle = last['close'] > last['open'] and close_pos >= 0.5
+        if (current > prior_high20
+                and last['high'] > prior_high20
+                and bullish_candle
+                and current >= ema20):
+            entry = round(current, 2)
+            sl    = round(entry - atr * 1.5, 2)
+            risk  = max(entry - sl, 0.01)
+            t1    = round(entry + risk * 1.0, 2)
+            t2    = round(entry + risk * 2.0, 2)
+            t3    = round(entry + risk * 3.0, 2)
+            return "BUY", {"entry": entry, "sl": sl, "targets": [t1, t2, t3]}
+
+        # ── BEARISH BREAKDOWN ──────────────────────────────────────────────
+        bearish_candle = last['close'] < last['open'] and close_pos <= 0.5
+        if (current < prior_low20
+                and last['low'] < prior_low20
+                and bearish_candle
+                and current <= ema20):
+            entry = round(current, 2)
+            sl    = round(entry + atr * 1.5, 2)
+            risk  = max(sl - entry, 0.01)
+            t1    = round(entry - risk * 1.0, 2)
+            t2    = round(entry - risk * 2.0, 2)
+            t3    = round(entry - risk * 3.0, 2)
+            return "SELL", {"entry": entry, "sl": sl, "targets": [t1, t2, t3]}
+
+        return "WAIT", None
+    except Exception:
+        return "WAIT", None
+
+
 def run_mini_golden_setup(bars):
     """
     Golden Setup — EMA Pullback in Trend
@@ -5567,8 +5733,9 @@ _STRATEGY_WEIGHTS = {
     "PAC+S&O":           3.0,
     "Narrative Swing":   3.0,
     "Hybrid VWAP+TWAP": 6.0,
+    "15m Breakout":    10.0,
 }
-_TOTAL_STRATEGY_WEIGHT = sum(_STRATEGY_WEIGHTS.values())  # 108.0
+_TOTAL_STRATEGY_WEIGHT = sum(_STRATEGY_WEIGHTS.values())  # 118.0
 
 
 def _get_strategy_weight(strategy_name: str) -> float:
@@ -6092,6 +6259,7 @@ def _mtf_scan_stock(stock_meta: Dict, timeframes: list) -> Optional[Dict]:
                 ("Reverse Swings A", lambda b: run_mini_reverse_swings(b, "A")),
                 ("Reverse Swings B", lambda b: run_mini_reverse_swings(b, "B")),
                 ("Explosive Volume", lambda b: run_mini_explosive_volume(b)),
+                ("15m Breakout",     lambda b: run_mini_breakout(b)),
                 ("Golden Setup",     lambda b: run_mini_golden_setup(b)),
                 ("Godzilla TTE",     lambda b: run_mini_godzilla(b)),
             ]:
@@ -6108,6 +6276,7 @@ def _mtf_scan_stock(stock_meta: Dict, timeframes: list) -> Optional[Dict]:
                             "targets":    [_safe(t) for t in levels.get("targets", [])],
                             "confidence": {"Falling Knife": 78, "Reverse Swings A": 72,
                                            "Reverse Swings B": 72, "Explosive Volume": 82,
+                                           "15m Breakout": 80,
                                            "Golden Setup": 85, "Godzilla TTE": 83}.get(sname, 75),
                         })
                 except Exception:
@@ -6206,6 +6375,16 @@ async def multi_tf_scanner_scan(request: Request, segment: str = "fo", timeframe
 
     if segment == "all":
         universe = _MTF_UNIVERSE
+    elif segment == "most_active":
+        # Dynamic universe — NSE's Most Active by Volume + Value (deduped, top 25)
+        try:
+            universe = _fetch_nse_most_active(limit=25)
+        except Exception as e:
+            logging.warning(f"NSE most-active fetch failed in scanner: {e}")
+            universe = []
+        if not universe:
+            # Fallback: high-liquidity F&O subset so the scan still runs
+            universe = [s for s in _MTF_UNIVERSE if s["segment"] == "fo"][:25]
     else:
         universe = [s for s in _MTF_UNIVERSE if s["segment"] == segment]
 
@@ -6246,6 +6425,26 @@ async def multi_tf_scanner_scan(request: Request, segment: str = "fo", timeframe
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
                  "Connection": "keep-alive", "Access-Control-Allow-Origin": "*"},
     )
+
+
+@api_router.get("/nse/most-active")
+async def get_nse_most_active(limit: int = 25):
+    """Return the day's Most Active equities (NSE) combined by Volume + Value, deduped.
+
+    Used by the Multi-TF Scanner's "Most Active" segment to preview the universe.
+    Cached server-side for 5 min via _fetch_nse_most_active().
+    """
+    try:
+        rows = _fetch_nse_most_active(limit=max(1, min(int(limit), 50)))
+    except Exception as e:
+        logging.warning(f"/nse/most-active failed: {e}")
+        rows = []
+    return {
+        "ok":     bool(rows),
+        "count":  len(rows),
+        "source": "NSE most-active (volume + value, deduped)",
+        "rows":   rows,
+    }
 
 
 # =============================================================================

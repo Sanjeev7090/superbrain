@@ -15,13 +15,14 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 // ── Segment options ──────────────────────────────────────────────────────────
 const SEGMENTS = [
-  { id: 'all',       label: 'All',       color: 'text-zinc-300',    bg: 'bg-zinc-500/20' },
-  { id: 'fo',        label: 'F&O',       color: 'text-blue-300',    bg: 'bg-blue-500/20' },
-  { id: 'index',     label: 'Indices',   color: 'text-yellow-300',  bg: 'bg-yellow-500/20' },
-  { id: 'banknifty', label: 'BankNifty', color: 'text-sky-300',     bg: 'bg-sky-500/20' },
-  { id: 'finnifty',  label: 'FinNifty',  color: 'text-violet-300',  bg: 'bg-violet-500/20' },
-  { id: 'midcap',    label: 'Midcap',    color: 'text-orange-300',  bg: 'bg-orange-500/20' },
-  { id: 'cash',      label: 'Cash',      color: 'text-emerald-300', bg: 'bg-emerald-500/20' },
+  { id: 'all',         label: 'All',         color: 'text-zinc-300',    bg: 'bg-zinc-500/20' },
+  { id: 'fo',          label: 'F&O',         color: 'text-blue-300',    bg: 'bg-blue-500/20' },
+  { id: 'index',       label: 'Indices',     color: 'text-yellow-300',  bg: 'bg-yellow-500/20' },
+  { id: 'banknifty',   label: 'BankNifty',   color: 'text-sky-300',     bg: 'bg-sky-500/20' },
+  { id: 'finnifty',    label: 'FinNifty',    color: 'text-violet-300',  bg: 'bg-violet-500/20' },
+  { id: 'midcap',      label: 'Midcap',      color: 'text-orange-300',  bg: 'bg-orange-500/20' },
+  { id: 'cash',        label: 'Cash',        color: 'text-emerald-300', bg: 'bg-emerald-500/20' },
+  { id: 'most_active', label: 'Most Active', color: 'text-pink-300',    bg: 'bg-pink-500/20' },
 ];
 
 const TF_OPTIONS = [
@@ -438,6 +439,11 @@ const MultiTFScannerModal = ({ onClose, onStockSelect }) => {
               <p className="text-[8px] text-zinc-600 mt-1">
                 Scans {SEGMENTS.find(s => s.id === segment)?.label || 'selected'} stocks across {selTFs.join(', ')} timeframes
               </p>
+              {segment === 'most_active' && (
+                <p className="text-[8px] text-pink-300/80 mt-1">
+                  Live NSE most-active equities (Volume + Value, deduped) · 15m Breakout strategy active
+                </p>
+              )}
             </div>
           ) : filtered.length === 0 && done ? (
             <div className="flex items-center justify-center h-24">
@@ -490,7 +496,7 @@ const MultiTFScannerModal = ({ onClose, onStockSelect }) => {
         {/* ── Footer ── */}
         <div className="px-4 py-2 border-t border-white/5 shrink-0 flex items-center justify-between">
           <p className="text-[8px] text-zinc-600">
-            Weighted confluence: Godzilla(22%) · SMC(20%) · MiroFish(18%) · ExpVol(12%) · …
+            Weighted confluence: Godzilla(22%) · SMC(20%) · MiroFish(18%) · ExpVol(12%) · <span className="text-pink-300">15m Breakout(10%)</span> · …
           </p>
           {scanning && (
             <div className="flex items-center gap-1 text-[8px] text-[#00E676]">
