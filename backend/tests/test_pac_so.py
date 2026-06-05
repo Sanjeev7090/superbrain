@@ -4,7 +4,7 @@ import requests
 import math
 import pytest
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://backend-500-fix.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://kronos-responsive-ui.preview.emergentagent.com").rstrip("/")
 
 
 def _gen_bars(n=60, start=100.0, trend=0.5, vol=1.0):
