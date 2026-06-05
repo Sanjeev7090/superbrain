@@ -149,7 +149,7 @@ const ChartPanel = ({
     markEdgeLabel(d.vah_price, 'VAH', '#A855F7');
     markEdgeLabel(d.val_price, 'VAL', '#06B6D4');
 
-    // ── 3. Heatmap column ─────────────────────────────────────────
+    // ── 3. Heatmap column — per-level Buy/Sell split ──────────────
     // Thin vertical separator
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.lineWidth = 0.5;
@@ -160,27 +160,50 @@ const ChartPanel = ({
       const y = series.priceToCoordinate(bin.price_mid);
       if (y == null || y < -rowH || y > H + rowH) return;
 
-      const volScore  = bin.total_vol / maxVol;
-      const distScore = 1 - Math.abs(bin.price_mid - pocPrice) / maxDist;
-      const score     = 0.55 * volScore + 0.45 * distScore;
+      const totalVol    = (bin.buy_vol || 0) + (bin.sell_vol || 0) || 1;
+      const buyRatio    = bin.buy_vol  / totalVol;   // 0-1
+      const sellRatio   = bin.sell_vol / totalVol;   // 0-1
+      // Brightness: louder levels = more opaque
+      const intensity   = 0.30 + (bin.total_vol / maxVol) * 0.70;
+      // POC zone gets full brightness
+      const alpha       = bin.is_poc ? 1.0 : intensity;
 
-      // Color ramp: navy → blue → teal → yellow → orange → red
-      let r, g, b, a;
-      if      (score < 0.20) { r=20;  g=30;  b=138; a=0.55 + score * 1.5; }
-      else if (score < 0.38) { r=3;   g=105; b=180; a=0.65 + score * 0.8; }
-      else if (score < 0.54) { r=5;   g=160; b=110; a=0.72 + score * 0.5; }
-      else if (score < 0.70) { r=200; g=160; b=8;   a=0.80 + score * 0.25; }
-      else if (score < 0.85) { r=234; g=88;  b=12;  a=0.88 + score * 0.12; }
-      else                   { r=220; g=38;  b=38;  a=1.0; }
+      const half = rowH;   // each cell spans rowH above + rowH below y
 
-      ctx.fillStyle = `rgba(${r},${g},${b},${Math.min(1, a)})`;
-      ctx.fillRect(HEAT_X, y - rowH, HEAT_W, rowH * 2);
+      // TOP half → Buy (green), width proportional to buy ratio
+      const buyPixW  = Math.max(1, HEAT_W * buyRatio);
+      const sellPixW = Math.max(1, HEAT_W * sellRatio);
 
-      // POC band — brightest white-hot line
+      // Background fill (dark base)
+      ctx.fillStyle = 'rgba(10,10,20,0.55)';
+      ctx.fillRect(HEAT_X, y - half, HEAT_W, half * 2);
+
+      // Buy bar — top half of cell
+      ctx.fillStyle = `rgba(0,230,118,${alpha})`;
+      ctx.fillRect(HEAT_X, y - half, buyPixW, half);
+
+      // Sell bar — bottom half of cell
+      ctx.fillStyle = `rgba(255,59,48,${alpha})`;
+      ctx.fillRect(HEAT_X, y, sellPixW, half);
+
+      // Thin mid-line separator between buy/sell
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.fillRect(HEAT_X, y - 0.5, HEAT_W, 1);
+
+      // Dominant side indicator: bright edge glow
+      const dominant = buyRatio > sellRatio ? 'buy' : sellRatio > buyRatio ? 'sell' : null;
+      if (dominant && bin.total_vol / maxVol > 0.3) {
+        ctx.fillStyle = dominant === 'buy'
+          ? `rgba(0,230,118,${alpha * 0.6})`
+          : `rgba(255,59,48,${alpha * 0.6})`;
+        // Right-edge glow strip (1px)
+        ctx.fillRect(HEAT_X + HEAT_W - 1, y - half, 1, half * 2);
+      }
+
+      // POC band — white-hot line + label
       if (bin.is_poc) {
-        ctx.fillStyle = 'rgba(255,255,200,0.95)';
-        ctx.fillRect(HEAT_X, y - 1.5, HEAT_W, 3);
-        // Tiny "H" label
+        ctx.fillStyle = 'rgba(255,230,150,0.95)';
+        ctx.fillRect(HEAT_X, y - 1, HEAT_W, 2);
         ctx.fillStyle = '#FF6B00';
         ctx.font = 'bold 6px monospace';
         ctx.fillText('H', HEAT_X + 2, y - 3);

@@ -293,3 +293,12 @@ In production (proper egress): NSEDirect/NSEPython will be primary.
 - `GET /api/nse/most-active?limit=10` → 200, returned IDEA, BSE, OLAELEC, ZEEL, RELIANCE, GTLINFRA, SBIN, YESBANK, ADANIENT, NETWORK18.
 - `SSE /api/multi-tf-scanner/scan?segment=most_active&timeframes=15m` → universe=25, OLAELEC fired `[Explosive Volume, 15m Breakout, AI Indicator]`.
 - `SSE /api/multi-tf-scanner/scan?segment=breakout_15m&timeframes=15m` → 80 scanned, 6 results (OLAELEC, TCS, ASIANPAINT, NESTLEIND, ADANIPORTS, FEDERALBNK) — all containing `15m Breakout` in 15m signals.
+
+
+## Session: VP Heatmap Buy/Sell Split per Level (Feb 2026)
+### ChartPanel.jsx
+- **Heatmap buy/sell per level**: Each cell top-half=green(buy), bottom-half=red(sell), proportional to ratio
+- Volume brightness: `alpha = 0.30 + (vol/maxVol)*0.70` — high-volume levels are most vivid
+- Dominant-side edge glow (right 1px strip) on levels with >30% of max volume
+- POC = white-hot center line + orange "H" marker
+- Voice search fixed: stale closure patched via `processCommandRef`; added Hindi patterns + simple ticker recognition
