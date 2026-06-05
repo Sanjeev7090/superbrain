@@ -150,6 +150,28 @@ Recent fork additions (Feb 2026):
 - yfinance (market data)
 - nsepython (NSE options chain)
 
+## Session: DreamerV3 RL + Kronos Fix (Jun 2026)
+
+### DreamerV3 RL Agent Replacement (✅ done — Jun 2026)
+- Replaced PPO/SAC (stable-baselines3) with DreamerV3 World Model RL
+- Architecture: RSSM (prior+posterior), Actor-Critic on imagined H-step trajectories, ReplayBuffer
+- `STATE_DIM=38, ACTION_DIM=16, LATENT_DIM=64, HIDDEN_DIM=256, HORIZON=15`
+- World model: RSSM KL + reward reconstruction loss
+- Actor: Gaussian + tanh squash, policy gradient loss
+- Critic: λ-return targets, soft target critic update (τ=0.005)
+- **Kronos Integration**: Kronos price-forecast direction used as reward shaping bonus during training
+  - Every 10 episodes: fetches Kronos OHLC forecast, computes direction+confidence → `bonus ≤ 0.15`
+  - Shapes reward toward Kronos-predicted market direction
+  - Frontend shows "KRONOS" pulsing badge when active
+- Frontend (`RLAgentPanel.jsx`): "DreamerV3" header, "World Model Losses" section (wm_loss/actor/critic), Kronos badge
+- Files: `backend/rl_agent/dreamer_trainer.py` (new), `rl_router.py` (updated), `RLAgentPanel.jsx` (updated)
+
+### Kronos safetensors Fix (✅ done — Jun 2026)
+- Root cause: `safetensors` package was missing from environment
+- Fix: `pip install safetensors==0.7.0` + added to requirements.txt
+- Kronos now loads: MODEL: KRONOS-SMALL (from NeoQuasar/Kronos-small on HuggingFace)
+- API tested: `/api/kronos/warmup` → `{loaded: true}`, `/api/kronos/forecast` → returns candles
+
 ## P0/P1/P2 Backlog
 
 ### P1 (Next)

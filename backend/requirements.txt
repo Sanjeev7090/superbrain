@@ -150,3 +150,4 @@ langgraph==1.2.2
 langgraph-checkpoint==4.1.1
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.3.15
+safetensors==0.7.0
