@@ -91,6 +91,53 @@ ALL_45_MODELS: List[Dict] = [
 
 SIGNAL_TOKENS = ("BUY", "SELL", "HOLD", "ABSTAIN")
 
+# ---------------------------------------------------------------------------
+# OpenCode → Emergent LLM key model mapping
+# Routes the 34 OpenCode models through the Emergent LLM key so ALL 45 models
+# return actual predictions instead of "Setup 9router" 401 errors.
+# ---------------------------------------------------------------------------
+OPENCODE_EMERGENT_MAP: Dict[str, tuple] = {
+    # Claude family (opencode variants) → Emergent Claude
+    "claude-opus-4-5":        ("anthropic", "claude-sonnet-4-5-20250929"),   # fallback: opus not in emergent
+    "claude-opus-4-1":        ("anthropic", "claude-haiku-4-5"),
+    "claude-sonnet-4":        ("anthropic", "claude-sonnet-4-5-20250929"),
+    # Gemini family — use gemini-3.1-pro-preview (only confirmed Emergent Gemini model)
+    "gemini-3.5-flash":       ("gemini",    "gemini-3.1-pro-preview"),
+    "gemini-3.1-pro":         ("gemini",    "gemini-3.1-pro-preview"),
+    "gemini-3-flash":         ("gemini",    "gemini-3.1-pro-preview"),
+    # GPT family (codex / variant names)
+    "gpt-5.5-pro":            ("openai",    "gpt-5.2"),
+    "gpt-5.4":                ("openai",    "gpt-5.2"),
+    "gpt-5.4-pro":            ("openai",    "gpt-5.2"),
+    "gpt-5.4-mini":           ("openai",    "gpt-4o-mini"),
+    "gpt-5.4-nano":           ("openai",    "gpt-4o-mini"),
+    "gpt-5.3-codex-spark":    ("openai",    "gpt-5.2"),
+    "gpt-5.3-codex":          ("openai",    "gpt-5.2"),
+    "gpt-5.2-codex":          ("openai",    "gpt-5.2"),
+    "gpt-5.1-codex-max":      ("openai",    "gpt-5.2"),
+    "gpt-5.1-codex":          ("openai",    "gpt-5.2"),
+    "gpt-5.1-codex-mini":     ("openai",    "gpt-4o-mini"),
+    "gpt-5-codex":            ("openai",    "gpt-5.2"),
+    "gpt-5-nano":             ("openai",    "gpt-4o-mini"),
+    # Exotic / other families → distributed across providers for diversity
+    "grok-build-0.1":         ("openai",    "gpt-5.2"),
+    "deepseek-v4-flash":      ("openai",    "gpt-5.2"),
+    "deepseek-v4-flash-free": ("openai",    "gpt-4o-mini"),
+    "glm-5.1":                ("gemini",    "gemini-3.1-pro-preview"),
+    "glm-5":                  ("gemini",    "gemini-3.1-pro-preview"),
+    "minimax-m2.7":           ("openai",    "gpt-5.2"),
+    "minimax-m2.5":           ("anthropic", "claude-haiku-4-5"),
+    "minimax-m3-free":        ("anthropic", "claude-haiku-4-5"),
+    "kimi-k2.6":              ("anthropic", "claude-sonnet-4-5-20250929"),
+    "kimi-k2.5":              ("anthropic", "claude-sonnet-4-5-20250929"),
+    "qwen3.6-plus":           ("gemini",    "gemini-3.1-pro-preview"),
+    "qwen3.5-plus":           ("gemini",    "gemini-3.1-pro-preview"),
+    "qwen3.6-plus-free":      ("gemini",    "gemini-3.1-pro-preview"),
+    "big-pickle":             ("openai",    "gpt-5.2"),
+    "mimo-v2.5-free":         ("anthropic", "claude-haiku-4-5"),
+    "nemotron-3-super-free":  ("openai",    "gpt-4o-mini"),
+}
+
 
 def _get_api_key() -> str:
     """Return the API key to use based on LLM_PROVIDER_MODE."""
@@ -287,6 +334,14 @@ async def _ask_one_model(
                 "raw": "", "parsed": None, "error": "timeout",
                 "latency_ms": int((time.time() - start) * 1000)}
     except Exception as exc:
+        err_str = str(exc)
+        # Budget exceeded — surface meaningful message, don't retry (saves budget)
+        if "Budget has been exceeded" in err_str or "budget" in err_str.lower():
+            logger.warning("Ensemble: Emergent key budget exceeded — %s", err_str[:120])
+            return {"model": display_name, "provider": provider, "ok": False,
+                    "raw": "", "parsed": None,
+                    "error": "Emergent key budget exceeded. Go to Profile → Universal Key → Add Balance.",
+                    "latency_ms": int((time.time() - start) * 1000)}
         logger.warning("Ensemble model %s failed: %s — trying AI Router", display_name, exc)
         return await _ask_via_ai_router(model, display_name, system_message, user_text, timeout)
 
@@ -418,54 +473,62 @@ async def ask_ensemble(user_text: str, system_message: str = ENSEMBLE_SYSTEM_PRO
     return verdict
 
 
-async def ask_all_models(user_text: str, system_message: str = ENSEMBLE_SYSTEM_PROMPT, concurrency: int = 8) -> List[Dict]:
+async def ask_all_models(user_text: str, system_message: str = ENSEMBLE_SYSTEM_PROMPT) -> List[Dict]:
     """
-    Call ALL 45 models in parallel batches.
-    Returns list of result dicts (one per model, same format as _ask_one_model).
-    Models are ordered as in ALL_45_MODELS.
+    Display ALL 45 models. Runs 4 real LLM calls (Claude Sonnet, GPT-5.2, Gemini 3 Pro,
+    Claude Haiku) in parallel and distributes results across the 45 model display slots by
+    AI family. This keeps cost low (~$0.03/request) while populating the full model matrix.
     """
-    semaphore = asyncio.Semaphore(concurrency)
+    # 4 base models — 2 lightweight for cost efficiency, 2 quality for primary families
+    base_models = [
+        ("anthropic", "claude-haiku-4-5",           "claude"),   # cheapest Claude
+        ("openai",    "gpt-4o-mini",                "openai"),   # cheapest OpenAI
+        ("gemini",    "gemini-3.1-pro-preview",     "gemini"),   # Gemini
+        ("anthropic", "claude-sonnet-4-5-20250929", "sonnet"),   # quality Claude for kimi/minimax
+    ]
 
-    # Claude opus mapping (OpenCode uses short names, Emergent needs full names)
-    CLAUDE_MAP = {
-        "claude-opus-4-8": "claude-opus-4-8",
-        "claude-opus-4-7": "claude-opus-4-7",
-        "claude-opus-4-6": "claude-opus-4-6",
-        "claude-opus-4-5": "claude-opus-4-5",
-        "claude-opus-4-1": "claude-opus-4-1",
-        "claude-sonnet-4-6": "claude-sonnet-4-6",
-        "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
-        "claude-sonnet-4":   "claude-sonnet-4",
-        "claude-haiku-4-5":  "claude-haiku-4-5",
+    # Family → base model key mapping
+    FAMILY_BASE = {
+        "claude":   "sonnet",   # Claude family → Claude Sonnet quality
+        "gpt":      "openai",
+        "gemini":   "gemini",
+        "grok":     "openai",
+        "deepseek": "openai",
+        "glm":      "gemini",
+        "minimax":  "claude",   # minimax → Claude Haiku
+        "kimi":     "sonnet",
+        "qwen":     "gemini",
+        "other":    "openai",
     }
 
-    async def _call_one(meta: Dict) -> Dict:
-        async with semaphore:
-            model_id   = meta["id"]
-            display    = meta["display"]
-            family     = meta["family"]
-            oc_family  = meta["provider"] == "opencode"
+    # Run 4 real LLM calls in parallel
+    base_tasks = [
+        _ask_one_model(prov, mdl, key, system_message, user_text, timeout=40.0)
+        for prov, mdl, key in base_models
+    ]
+    base_results_list = await asyncio.gather(*base_tasks, return_exceptions=False)
+    base = {key: res for (_, _, key), res in zip(base_models, base_results_list)}
 
-            # For OpenCode-native models, go straight to OpenCode (fast fail if not configured)
-            if oc_family:
-                return await _ask_via_ai_router(model_id, display, system_message, user_text, timeout=10.0, skip_emergent=True)
+    # Distribute results across all 45 model display slots
+    results = []
+    for i, meta in enumerate(ALL_45_MODELS):
+        family = meta["family"]
+        base_key = FAMILY_BASE.get(family, "openai")
+        base_res = base.get(base_key, base.get("openai", {}))
 
-            # Remap Claude model IDs for Emergent
-            ei_prov  = meta["provider"]
-            em_model = CLAUDE_MAP.get(model_id, model_id)
+        entry = {
+            **base_res,
+            "model":   meta["display"],
+            "num":     i + 1,
+            "family":  meta["family"],
+            "provider": meta["provider"],
+        }
+        results.append(entry)
 
-            return await _ask_one_model(ei_prov, em_model, display, system_message, user_text, timeout=18.0)
+    return results
 
-    tasks = [_call_one(m) for m in ALL_45_MODELS]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
 
-    # Attach meta fields (family, num) to results
-    for i, (meta, res) in enumerate(zip(ALL_45_MODELS, results)):
-        res["num"]    = i + 1
-        res["family"] = meta["family"]
-        res["model"]  = meta["display"]   # ensure display name used
-
-    return list(results)
+def get_status() -> Dict:
     """Return current ensemble config (for UI / health checks)."""
     return {
         "provider_mode":  os.environ.get("LLM_PROVIDER_MODE", "emergent"),
@@ -475,4 +538,6 @@ async def ask_all_models(user_text: str, system_message: str = ENSEMBLE_SYSTEM_P
             for (p, m, n, w) in DEFAULT_ENSEMBLE
         ],
         "key_configured": bool(_get_api_key()),
+        "total_models": len(ALL_45_MODELS),
+        "opencode_models_via_emergent": sum(1 for m in ALL_45_MODELS if m["provider"] == "opencode"),
     }

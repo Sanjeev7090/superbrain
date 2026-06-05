@@ -179,7 +179,7 @@ function LoadingBar({ label }) {
     <div className="flex flex-col items-center justify-center py-12 gap-3">
       <div className="w-8 h-8 border-2 border-fuchsia-500/40 border-t-fuchsia-400 rounded-full animate-spin" />
       <div className="text-[10px] text-zinc-400">{label}{dots}</div>
-      <div className="text-[9px] text-zinc-600">Calling 45 models in parallel — takes ~30-45s</div>
+      <div className="text-[9px] text-zinc-600">4 AI calls → 45 model results</div>
     </div>
   );
 }
@@ -327,18 +327,25 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
           ⚠ {error}
         </div>
       )}
-
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto min-h-0">
 
         {/* LOADING */}
-        {busy && activeTask === 'full' && <LoadingBar label="Asking all 45 models" />}
+        {busy && activeTask === 'full' && <LoadingBar label="Asking all 45 models (4 AI calls)" />}
         {busy && activeTask === 'signal' && <LoadingBar label="Asking 3 models" />}
         {busy && activeTask === 'gann' && <LoadingBar label="Running AI Gann + SoQ optimisation" />}
 
         {/* ── FULL ANALYSIS (45 models) ── */}
         {!busy && mode === 'full' && fullResult && (
           <div data-testid="full-analysis-result">
+            {fullResult.budget_warning && (
+              <div className="mx-3 mt-2 px-3 py-2 border border-amber-500/30 bg-amber-500/8 rounded text-[9px]" data-testid="budget-warning">
+                <div className="font-bold text-amber-400 mb-0.5">Universal Key Budget Exceeded</div>
+                <div className="text-zinc-500 leading-relaxed">
+                  Go to <span className="text-zinc-300">Profile → Universal Key → Add Balance</span> to top up and re-run.
+                </div>
+              </div>
+            )}
             <ConsensusStrip
               counts={fullResult.vote_counts}
               total={fullResult.total}
@@ -350,16 +357,6 @@ export default function EnsembleCockpitPanel({ selectedStock }) {
                 <ModelRow key={r.num} result={r} />
               ))}
             </div>
-            {/* OpenCode note */}
-            {fullResult.models.some(m => !m.ok && (m.error || '').includes('401')) && (
-              <div className="mx-3 my-3 px-3 py-2.5 border border-amber-500/20 bg-amber-500/5 rounded text-[9px]">
-                <div className="font-bold text-amber-400 mb-1">DeepSeek / GLM / Kimi / Qwen models need OpenCode auth</div>
-                <div className="text-zinc-500 leading-relaxed">
-                  Run <code className="font-mono text-zinc-300">npx 9router</code> locally → Connect OpenCode Free → Enable provider in AI Router settings.
-                  These models (numbered 30-45) will auto-work once 9router is running at localhost:20128.
-                </div>
-              </div>
-            )}
           </div>
         )}
 

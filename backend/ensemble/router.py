@@ -226,6 +226,10 @@ async def full_analysis(req: SignalRequest):
     consensus = max(counts, key=counts.get) if ok_results else "HOLD"
     avg_conf = int(sum(r.get("confidence", 0) for r in ok_results) / len(ok_results)) if ok_results else 0
 
+    # Surface budget-exceeded error clearly
+    budget_errors = [r for r in enriched if "budget" in (r.get("error") or "").lower()]
+    budget_warning = budget_errors[0].get("error") if budget_errors else None
+
     return {
         "success":       True,
         "ticker":        req.ticker,
@@ -235,6 +239,7 @@ async def full_analysis(req: SignalRequest):
         "consensus":     consensus,
         "avg_confidence": avg_conf,
         "vote_counts":   counts,
+        "budget_warning": budget_warning,
     }
 
 
