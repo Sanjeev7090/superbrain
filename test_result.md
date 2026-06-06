@@ -415,3 +415,94 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "Implemented two new features: (1) Weighted Confluence Scoring - replaced old flat-score system with strategy weights from user image (Godzilla 22%, SMC 20%, MiroFish 18%, ExpVol 12%, etc.) in _calc_weighted_confluence(); applied to auto-scan endpoint. (2) Multi-TF + Multi-Asset Scanner - new /api/multi-tf-scanner/scan SSE endpoint scans F&O/Cash/Index/BankNifty/FinNifty/Midcap universe (100+ stocks) across 15M/1H/1D timeframes with MTF confluence scoring. New MultiTFScannerModal.jsx component with segment/TF filters, progress bar, sortable table with per-TF direction columns, confluence dots, CSV export. New 'Multi-TF' button added in AutoScanner header."
+  - agent: "main"
+    message: "POST-PULL VERIFICATION: Repository was just pulled from GitHub (Sanjeev7090/robot-3). Missing .env files (backend & frontend) recreated with MONGO_URL, DB_NAME, CORS_ORIGINS, EMERGENT_LLM_KEY (backend) and REACT_APP_BACKEND_URL (frontend). Reinstalled CPU-only torch 2.12.0 to fix libcublasLt CUDA dependency error. Backend now responds with 200 at /api/ ('Gann Angles Trader API - NSE Edition'). Frontend compiles and serves at port 3000. Please run BACKEND verification tests on: (1) Core API health, (2) Robo-Trader endpoints (/api/robo/settings, /status, /risk-preview, /capital-state, /risk-report), (3) Auto-scanner weighted confluence (/api/auto-scan/{ticker}), (4) Multi-TF scanner SSE endpoint (/api/multi-tf-scanner/scan), (5) A few strategy endpoints (falling-knife, golden-setup, demon). Skip Groww endpoints (require live API keys). Use ticker 'RELIANCE.NS' or 'TCS.NS' for tests. Mark any failures so we can fix them before frontend testing."
+
+  - task: "POST-PULL VERIFICATION - Core API Health"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "GET /api/ returns 200 with message 'Gann Angles Trader API - NSE Edition'. Core API health check passing."
+
+  - task: "POST-PULL VERIFICATION - Robo-Trader Phase 2 Endpoints"
+    implemented: true
+    working: true
+    file: "backend/agents/robo_router.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 9 Robo-Trader Phase 2 endpoints tested and working: (1) GET /robo/settings - returns preferences, risk_profile, capital_state_vector ✓ (2) POST /robo/settings - accepts daily_target & allocated_capital, persists correctly ✓ (3) GET /robo/status - returns full robo state with capital_state_vector ✓ (4) POST /robo/risk-preview - returns preview with Kelly, VaR/CVaR, feasibility metrics ✓ (5) GET /robo/capital-state - returns normalized capital state vector ✓ (6) GET /robo/risk-report - returns position_sizing with Kelly, var_cvar with VaR95/99, feasibility ✓ (7) POST /robo/recalculate - triggers full RPM recalculation, returns audit_id ✓ (8) GET /robo/audit - returns paper trade audit trail ✓ (9) GET /robo/recalc-history - returns recalculation history ✓"
+
+  - task: "POST-PULL VERIFICATION - Auto Scanner Weighted Confluence"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "GET /auto-scan/RELIANCE.NS working correctly. Returns confluence_score (21/100), confluence_label (WEAK), signals array with 5 strategies analyzed. Weighted confluence system operational. Response includes ticker, current_price, signals, has_signal, signal_count, dominant_direction, aligned_count."
+
+  - task: "POST-PULL VERIFICATION - Multi-TF Scanner SSE"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "GET /multi-tf-scanner/scan SSE endpoint working. Stream opens successfully, receives events, and closes cleanly. Tested with params: segment=index, timeframes=15m,1h, min_confluence=50. SSE streaming functional."
+
+  - task: "POST-PULL VERIFICATION - Strategy Endpoints"
+    implemented: true
+    working: false
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: false
+        agent: "testing"
+        comment: "Strategy endpoints tested: (1) GET /stock/bars/RELIANCE.NS - working, fetched 81 bars ✓ (2) POST /falling-knife/analyze - working, returns signal_type, status, conditions_met ✓ (3) POST /golden-setup/analyze - working, returns signal_type, entry_price, stop_loss ✓ (4) POST /demon/analyze - FAILING with 500 error: 'too many values to unpack (expected 2)'. ROOT CAUSE: In server.py line 5325, code expects 'ai_signal, ai_score = run_mini_ai_indicator(bars)' (2 values), but run_mini_ai_indicator() returns 3 values when score > 75 or < 25 (lines 5150, 5157: returns signal, dict, score). Also returns 3 values on exception (line 5160). FIX NEEDED: Either change line 5325 to unpack 3 values or modify run_mini_ai_indicator to consistently return 2 values."
+
+  - task: "POST-PULL VERIFICATION - Indices Live"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "GET /indices/live returns 200. Endpoint operational (may return mocked data if NSE blocks cloud IPs, but endpoint itself is functional)."
+
+metadata:
+  created_by: "main_agent"
+  version: "2.1"
+  test_sequence: 2
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Fix DEMON endpoint bug (run_mini_ai_indicator return value mismatch)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "testing"
+    message: "POST-PULL VERIFICATION COMPLETE. Test Results: 16/17 tests passing (94.1% success rate). ✅ WORKING: (1) Core API health, (2) All 9 Robo-Trader Phase 2 endpoints (settings, status, risk-preview, capital-state, risk-report, recalculate, audit, recalc-history), (3) Auto Scanner with weighted confluence (21/100 score, WEAK label), (4) Multi-TF Scanner SSE streaming, (5) Stock bars endpoint, (6) Falling Knife strategy, (7) Golden Setup strategy, (8) Indices live. ❌ FAILING: DEMON strategy endpoint - 500 error due to tuple unpacking bug in run_mini_ai_indicator() function (returns 2 or 3 values inconsistently). Backend logs show: 'Error in demon analysis: too many values to unpack (expected 2)'. Root cause identified at server.py:5325 and lines 5150/5157/5160. All critical Robo-Trader functionality verified working post-pull."
