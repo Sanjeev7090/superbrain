@@ -32,7 +32,7 @@ import RegulatoryWatchdogPanel from './RegulatoryWatchdogPanel';
 import NarrativeSwingAnalysis from './NarrativeSwingAnalysis';
 import HybridVWAPAnalysis from './HybridVWAPAnalysis';
 import RLAgentPanel from './RLAgentPanel';
-import RoboDashboard from './RoboDashboard';
+import RoboDashboard from './robo/RoboAdvisorDashboard';
 import EnsembleCockpitPanel from './EnsembleCockpitPanel';
 import SectorRotationPicker from './SectorRotationPicker';
 import MoneycontrolMovers from './MoneycontrolMovers';
