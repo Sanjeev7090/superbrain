@@ -94,6 +94,16 @@ class CancelPendingRequest(BaseModel):
     order_id: str = Field(..., description="Order ID to cancel (PENDING only)")
 
 
+class ManualTickerRequest(BaseModel):
+    ticker: str = Field(..., description="NSE/BSE ticker (e.g. RELIANCE.NS)")
+
+
+class ScanNowRequest(BaseModel):
+    mode:     str   = Field("hybrid", description="auto | manual | hybrid")
+    deep:     bool  = Field(False,    description="Use LangGraph deep analysis")
+    ticker:   Optional[str] = Field(None, description="Single ticker to analyse (overrides mode)")
+
+
 class RiskPreviewRequest(BaseModel):
     """What-if calculator — preview risk profile without saving."""
     daily_profit_target: float = Field(..., gt=0,    description="Daily target in ₹")
@@ -639,3 +649,169 @@ async def emergency_close_all():
     except Exception as exc:
         logger.exception("[robo_router] emergency close-all failed")
         return {"success": False, "error": str(exc)}
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MULTI-AGENT COLLABORATION ENDPOINTS
+# ════════════════════════════════════════════════════════════════════════════════
+
+@robo_router.get("/agent-discussion")
+async def get_agent_discussion():
+    """
+    GET latest agent discussion (cached result from last scan).
+    Returns the full multi-agent discussion including per-agent signals,
+    consensus, Monte Carlo scenarios, and Dreamer V3 final reasoning.
+    """
+    disc = orch.get_agent_discussion()
+    top  = orch.get_top_picks()
+    return {
+        "success":          True,
+        "discussion":       disc if disc else None,
+        "top_picks":        top,
+        "last_scan_time":   orch.get_robo_state().get("last_scan_time"),
+        "scan_mode":        orch.get_robo_state().get("scan_mode", "auto"),
+        "disclaimer":       DISCLAIMER,
+    }
+
+
+@robo_router.post("/scan-now")
+async def scan_now(req: ScanNowRequest, bg: BackgroundTasks):
+    """
+    POST trigger an immediate collaborative scan.
+    If `ticker` is provided: analyse that single ticker deeply.
+    Otherwise: scan in `mode` (auto/manual/hybrid).
+    """
+    if req.ticker:
+        # Single ticker detailed analysis
+        def _run():
+            orch._run_collaborative_analysis(
+                ticker   = req.ticker,
+                deep     = req.deep,
+            )
+        bg.add_task(_run)
+        return {
+            "success": True,
+            "message": f"Deep analysis started for {req.ticker}",
+            "mode":    "single_ticker",
+            "deep":    req.deep,
+        }
+    else:
+        # Multi-ticker scan
+        def _scan():
+            orch.trigger_scan(
+                mode   = req.mode,
+                deep   = req.deep,
+            )
+        bg.add_task(_scan)
+        return {
+            "success": True,
+            "message": f"Collaborative scan triggered in '{req.mode}' mode",
+            "mode":    req.mode,
+            "deep":    req.deep,
+        }
+
+
+@robo_router.get("/manual-stocks")
+async def get_manual_stocks():
+    """GET list of user-added manual tickers."""
+    tickers = orch.get_manual_tickers()
+    return {
+        "success":        True,
+        "manual_tickers": tickers,
+        "count":          len(tickers),
+    }
+
+
+@robo_router.post("/manual-stocks/add")
+async def add_manual_stock(req: ManualTickerRequest):
+    """POST add a ticker to the manual watchlist."""
+    result = orch.add_manual_ticker(req.ticker)
+    return {**result, "disclaimer": DISCLAIMER}
+
+
+@robo_router.post("/manual-stocks/remove")
+async def remove_manual_stock(req: ManualTickerRequest):
+    """POST remove a ticker from the manual watchlist."""
+    result = orch.remove_manual_ticker(req.ticker)
+    return result
+
+
+@robo_router.get("/scenarios/{ticker}")
+async def get_scenarios(ticker: str, capital: float = Query(100000.0)):
+    """
+    GET Monte Carlo scenario analysis for a ticker using current agent signals.
+    Runs 1000-path GBM simulation → target-hit probability, expected P&L.
+    """
+    try:
+        from .strategy_collaborator import MonteCarloScenarioEngine, _download_ohlcv
+        import yfinance as yf
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _run_mc():
+            try:
+                df  = _download_ohlcv(ticker, period="30d", interval="1d")
+                if df.empty:
+                    return {"error": "No price data"}
+                c   = df["Close"].astype(float)
+                h   = df["High"].astype(float)
+                lo  = df["Low"].astype(float)
+                import pandas as pd
+                h_l  = h - lo
+                h_pc = (h - c.shift(1)).abs()
+                l_pc = (lo - c.shift(1)).abs()
+                tr   = pd.concat([h_l, h_pc, l_pc], axis=1).max(axis=1)
+                atr  = float(tr.rolling(14).mean().iloc[-1])
+                price = float(c.iloc[-1])
+                entry  = price
+                sl     = round(price - atr * 2.0, 2)
+                target = round(price + atr * 3.0, 2)
+
+                eng = MonteCarloScenarioEngine()
+                return {
+                    "ticker":  ticker,
+                    "entry":   round(entry, 2),
+                    "sl":      sl,
+                    "target":  target,
+                    "atr14":   round(atr, 2),
+                    **eng.run(entry=entry, sl=sl, target=target, capital=capital, ticker=ticker),
+                }
+            except Exception as e:
+                return {"error": str(e)}
+
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            result = await loop.run_in_executor(ex, _run_mc)
+
+        return {"success": True, "scenarios": result, "disclaimer": DISCLAIMER}
+
+    except Exception as exc:
+        logger.exception("[robo_router] scenarios failed")
+        return {"success": False, "error": str(exc)}
+
+
+@robo_router.get("/active-stocks")
+async def get_active_stocks(limit: int = Query(25, ge=5, le=50)):
+    """
+    GET most-active stocks from NSE + F&O universe.
+    Returns tickers ranked by volume × momentum score.
+    """
+    try:
+        from .strategy_collaborator import collaborator
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            stocks = await loop.run_in_executor(
+                ex, lambda: collaborator.get_active_stocks(limit)
+            )
+        return {
+            "success":    True,
+            "count":      len(stocks),
+            "stocks":     stocks,
+            "disclaimer": DISCLAIMER,
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+

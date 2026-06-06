@@ -360,6 +360,12 @@ _state: Dict = {
     "uptime_start":         None,
     # Audit trail (in-memory ring, last 100 trades)
     "audit_trail":          [],
+    # ── Multi-Agent Collaboration (Phase 4+) ──
+    "agent_discussion":     None,         # latest AgentDiscussion dict
+    "last_scan_time":       None,         # when last collaborative scan ran
+    "scan_mode":            "auto",       # auto | manual | hybrid
+    "manual_tickers":       [],           # user-added tickers
+    "top_picks":            [],           # top stocks from last scan
 }
 
 _stop_evt   = threading.Event()
@@ -376,6 +382,137 @@ def _upd(**kw):
 def get_robo_state() -> Dict:
     with _lock:
         return dict(_state)
+
+
+# ─── Multi-Agent Collaboration ────────────────────────────────────────────────
+
+def _run_collaborative_analysis(
+    ticker:    str,
+    capital:   float = None,
+    risk_tol:  str   = None,
+    deep:      bool  = False,
+) -> Dict:
+    """
+    Run StrategyCollaborator for a ticker and store result in state.
+    Returns the AgentDiscussion dict.
+    Called from: auto-mode worker, manual scan trigger, decision engine.
+    """
+    try:
+        from .strategy_collaborator import collaborator
+        with _lock:
+            cap = capital or _state.get("allocated_capital", DEFAULT_CAPITAL)
+            tol = risk_tol or _state.get("risk_tolerance", "moderate")
+
+        disc = collaborator.run_discussion(ticker, capital=cap, risk_tolerance=tol, deep=deep)
+        disc_dict = disc.to_dict()
+        _upd(
+            agent_discussion = disc_dict,
+            last_scan_time   = datetime.now(timezone.utc).isoformat(),
+        )
+        logger.info(
+            "[Collab] Discussion done: %s | %s %.0f%% | bull=%d bear=%d",
+            ticker, disc.consensus, disc.consensus_confidence,
+            disc.bull_count, disc.bear_count,
+        )
+        return disc_dict
+    except Exception as exc:
+        logger.warning("[Collab] Discussion failed for %s: %s", ticker, exc)
+        return {"error": str(exc), "ticker": ticker}
+
+
+def trigger_scan(
+    mode:            str   = "hybrid",
+    deep:            bool  = False,
+    manual_tickers:  List  = None,
+    capital:         float = None,
+) -> Dict:
+    """
+    Trigger an immediate collaborative scan across tickers.
+    Returns: {top_picks: [...], scan_mode, timestamp}
+    """
+    try:
+        from .strategy_collaborator import collaborator
+        with _lock:
+            cap    = capital or _state.get("allocated_capital", DEFAULT_CAPITAL)
+            manual = manual_tickers or list(_state.get("manual_tickers", []))
+            mode   = mode or _state.get("scan_mode", "hybrid")
+
+        logger.info("[Collab] Scan triggered | mode=%s | manual=%s", mode, manual)
+        discussions = collaborator.scan_and_rank(
+            manual_tickers=manual, mode=mode, capital=cap, top_n=5
+        )
+
+        top_picks = []
+        for d in discussions:
+            top_picks.append({
+                "ticker":     d.ticker,
+                "consensus":  d.consensus,
+                "confidence": round(d.consensus_confidence, 1),
+                "score":      round(d.weighted_score, 1),
+                "bull":       d.bull_count,
+                "bear":       d.bear_count,
+                "mc_target_prob": d.monte_carlo.get("target_hit_prob", 0),
+                "scan_id":    d.scan_id,
+            })
+
+        # Store best discussion in state
+        if discussions:
+            best = discussions[0]
+            _upd(
+                agent_discussion = best.to_dict(),
+                top_picks        = top_picks,
+                last_scan_time   = datetime.now(timezone.utc).isoformat(),
+                scan_mode        = mode,
+            )
+
+        return {
+            "success":    True,
+            "top_picks":  top_picks,
+            "scan_mode":  mode,
+            "tickers_scanned": len(discussions),
+            "timestamp":  datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.error("[Collab] Scan error: %s", exc)
+        return {"success": False, "error": str(exc)}
+
+
+def add_manual_ticker(ticker: str) -> Dict:
+    """Add a ticker to the manual watchlist."""
+    ticker = ticker.strip().upper()
+    if not ticker.endswith(".NS") and not ticker.endswith(".BO"):
+        ticker = ticker + ".NS"
+    with _lock:
+        tickers = list(_state.get("manual_tickers", []))
+        if ticker not in tickers:
+            tickers.append(ticker)
+            _state["manual_tickers"] = tickers
+    logger.info("[Collab] Added manual ticker: %s", ticker)
+    return {"success": True, "ticker": ticker, "manual_tickers": tickers}
+
+
+def remove_manual_ticker(ticker: str) -> Dict:
+    """Remove a ticker from the manual watchlist."""
+    ticker = ticker.strip().upper()
+    with _lock:
+        tickers = [t for t in _state.get("manual_tickers", []) if t != ticker]
+        _state["manual_tickers"] = tickers
+    return {"success": True, "manual_tickers": tickers}
+
+
+def get_manual_tickers() -> List[str]:
+    with _lock:
+        return list(_state.get("manual_tickers", []))
+
+
+def get_agent_discussion() -> Optional[Dict]:
+    with _lock:
+        return dict(_state.get("agent_discussion") or {})
+
+
+def get_top_picks() -> List[Dict]:
+    with _lock:
+        return list(_state.get("top_picks") or [])
 
 
 # ─── Risk Recalculation — delegates to RPM ────────────────────────────────────
@@ -640,10 +777,65 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
 
         effective_confidence = min(100, int(confidence * behind_boost))
 
+        # ── Agent Consensus Blending ──────────────────────────────────────
+        # Pull latest discussion from state (non-blocking)
+        agent_consensus = {}
+        blended_signal  = signal
+        blended_conf    = effective_confidence
+        agent_override  = False
+
+        with _lock:
+            disc = _state.get("agent_discussion") or {}
+
+        if disc and disc.get("ticker") == ticker:
+            c_signal = disc.get("consensus", "HOLD")
+            c_conf   = float(disc.get("consensus_confidence", 0))
+            c_score  = float(disc.get("weighted_score", 0))
+
+            # Blend: 60% DreamerV3 + 40% agent consensus
+            dreamer_numeric = (1 if signal == "BUY" else -1 if signal == "SELL" else 0) * effective_confidence
+            agent_numeric   = (1 if c_signal == "BUY" else -1 if c_signal == "SELL" else 0) * c_conf
+            blended_numeric = dreamer_numeric * 0.60 + agent_numeric * 0.40
+
+            if abs(blended_numeric) >= 25:
+                blended_signal = "BUY" if blended_numeric > 0 else "SELL"
+                blended_conf   = int(min(98, abs(blended_numeric)))
+            else:
+                blended_signal = "HOLD"
+                blended_conf   = max(10, int(50 - abs(blended_numeric)))
+
+            # Hard override: if agents STRONGLY disagree with DreamerV3 → HOLD
+            if signal != "HOLD" and c_signal not in (signal, "HOLD") and c_conf > 60:
+                blended_signal = "HOLD"
+                blended_conf   = 30
+                agent_override = True
+                logger.info(
+                    "[DreamerV3] Agent override: DV3=%s but agents=%s (conf=%.0f) → HOLD",
+                    signal, c_signal, c_conf,
+                )
+
+            agent_consensus = {
+                "agent_signal":    c_signal,
+                "agent_conf":      round(c_conf, 1),
+                "agent_score":     round(c_score, 1),
+                "blended_signal":  blended_signal,
+                "blended_conf":    blended_conf,
+                "agent_override":  agent_override,
+                "dreamer_only":    False,
+            }
+            logger.info(
+                "[DreamerV3] Blended: DV3=%s(%d) + Agents=%s(%.0f) → %s(%d)",
+                signal, effective_confidence, c_signal, c_conf,
+                blended_signal, blended_conf,
+            )
+        else:
+            # No collaborative analysis yet — run fast background analysis
+            agent_consensus = {"dreamer_only": True}
+
         return {
-            "signal":          signal,
-            "confidence":      effective_confidence,
-            "direction":       1 if signal == "BUY" else (-1 if signal == "SELL" else 0),
+            "signal":          blended_signal,
+            "confidence":      blended_conf,
+            "direction":       1 if blended_signal == "BUY" else (-1 if blended_signal == "SELL" else 0),
             "quantity":        quantity,
             "entry_price":     round(price, 2),
             "sl_price":        round(sl_price, 2),
@@ -651,6 +843,8 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
             "position_value":  round(position_value, 2),
             "dreamer_active":  True,
             "dreamer_status":  dreamer_status,
+            "dreamer_raw_signal": signal,
+            "dreamer_raw_conf":   effective_confidence,
             "wm_loss":         round(wm_loss, 6),
             "strategy_weights": weights,
             "market_context":  ctx,
@@ -661,7 +855,12 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
             "daily_pnl":       daily_pnl,
             "target_gap":      round(target_gap, 2),
             "behind_boost":    round(behind_boost, 3),
-            "message":         f"Dreamer signal: {signal} ({effective_confidence}% conf) | {regime} | RSI {rsi14:.0f}",
+            "agent_consensus": agent_consensus,
+            "message": (
+                f"Blended: DV3={signal}({effective_confidence}%) + "
+                f"Agents={agent_consensus.get('agent_signal','—')}({agent_consensus.get('agent_conf',0):.0f}%) "
+                f"→ {blended_signal}({blended_conf}%) | {regime} | RSI {rsi14:.0f}"
+            ),
             "timestamp":       datetime.now(timezone.utc).isoformat(),
         }
 

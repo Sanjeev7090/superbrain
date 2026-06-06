@@ -26,6 +26,7 @@ import AgentStatusPanel      from './AgentStatusPanel';
 import TradeExplainability   from './TradeExplainability';
 import RoboControls          from './RoboControls';
 import TargetCapitalSettings from './TargetCapitalSettings';
+import AgentDiscussionPanel  from './AgentDiscussionPanel';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const fmt    = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -173,6 +174,7 @@ export default function RoboAdvisorDashboard({ selectedStock }) {
   const [modeLoading,    setModeLoading]    = useState(false);
   const [recalcLoading,  setRecalcLoading]  = useState(false);
   const [lastRefresh,    setLastRefresh]    = useState(null);
+  const [activeTab,      setActiveTab]      = useState('overview'); // overview | agents
 
   const pollRef = useRef(null);
 
@@ -479,6 +481,31 @@ export default function RoboAdvisorDashboard({ selectedStock }) {
           />
         </div>
 
+        {/* ── Tab Switcher ──────────────────────────────────────────────── */}
+        <div className="flex gap-1 p-1 bg-zinc-900/60 border border-zinc-800/50 rounded-xl w-fit">
+          {[
+            { id: 'overview', label: 'Overview',       icon: BarChart2 },
+            { id: 'agents',   label: 'Agent Discussion', icon: Activity  },
+          ].map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setActiveTab(id)}
+              data-testid={`tab-${id}`}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-[10px] font-bold transition-all ${
+                activeTab === id
+                  ? 'bg-violet-600/25 border border-violet-500/40 text-violet-200'
+                  : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Icon size={11} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* ── OVERVIEW TAB ──────────────────────────────────────────────── */}
+        {activeTab === 'overview' && (<>
+
         {/* ── Main 3-column layout ─────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
 
@@ -636,6 +663,19 @@ export default function RoboAdvisorDashboard({ selectedStock }) {
                 {w}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Bottom spacer */}
+        <div className="h-6" />
+
+        {/* ── OVERVIEW TAB close ─────────────────────────────────────────── */}
+        </>)}
+
+        {/* ── AGENTS TAB ────────────────────────────────────────────────── */}
+        {activeTab === 'agents' && (
+          <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-2xl p-4">
+            <AgentDiscussionPanel capital={settings.allocated_capital || 100000} />
           </div>
         )}
 
