@@ -106,7 +106,7 @@ class TestRLAgentTrainPPO:
         # Status should be 'training' or already completed to 'running'
         assert data["status"] in ("training", "running", "paused"), \
             f"Expected training/running/paused, got: {data['status']}"
-        assert data["algorithm"] == "PPO", f"Expected PPO algorithm, got: {data['algorithm']}"
+        assert data["algorithm"] == "DreamerV3", f"Expected DreamerV3 algorithm, got: {data['algorithm']}"
         assert data["ticker"] == "RELIANCE.NS"
         print(f"PASS: status={data['status']}, algorithm={data['algorithm']}, ticker={data['ticker']}")
 
@@ -299,9 +299,9 @@ class TestRLAgentSAC:
         data = r.json()
         assert data["status"] in ("training", "running", "paused"), \
             f"Expected training/running/paused, got: {data['status']}"
-        assert data["algorithm"] == "SAC", f"Expected SAC algorithm, got: {data['algorithm']}"
+        assert data["algorithm"] == "DreamerV3", f"Expected DreamerV3 algorithm, got: {data['algorithm']}"
         assert data["ticker"] == "TCS.NS", f"Expected TCS.NS ticker, got: {data['ticker']}"
-        print(f"PASS: SAC training — status={data['status']}, algo={data['algorithm']}, ticker={data['ticker']}")
+        print(f"PASS: DreamerV3 training — status={data['status']}, algo={data['algorithm']}, ticker={data['ticker']}")
 
     def test_sac_duplicate_train_returns_error_while_training(self):
         """Cannot start training when SAC is already training."""

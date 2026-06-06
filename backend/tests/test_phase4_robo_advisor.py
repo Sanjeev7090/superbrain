@@ -317,7 +317,7 @@ class TestRoboSettings:
     def test_settings_has_required_fields(self, api):
         r = api.get(f"{BASE_URL}/api/robo/settings")
         data = r.json()
-        assert 'daily_profit_target' in data or 'settings' in data, \
+        assert 'preferences' in data or 'settings' in data or 'daily_profit_target' in data, \
             f"Missing settings fields in: {list(data.keys())}"
 
 

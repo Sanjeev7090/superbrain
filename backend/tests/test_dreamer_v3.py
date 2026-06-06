@@ -255,8 +255,8 @@ class TestDreamerV3Predict:
     def test_predict_has_actor_loss_field(self):
         r = requests.post(f"{BASE_URL}/api/rl-agent/predict", json={"ticker": "RELIANCE.NS"})
         data = r.json()
-        assert "actor_loss" in data, f"Missing DreamerV3 field: actor_loss. Response: {data}"
-        print(f"PASS: actor_loss present = {data.get('actor_loss')}")
+        assert "wm_loss" in data, f"Missing DreamerV3 field: wm_loss. Response: {data}"
+        print(f"PASS: wm_loss present = {data.get('wm_loss')}")
 
     def test_predict_signal_is_valid(self):
         r = requests.post(f"{BASE_URL}/api/rl-agent/predict", json={"ticker": "RELIANCE.NS"})

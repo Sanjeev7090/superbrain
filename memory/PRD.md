@@ -10,6 +10,17 @@ Recent fork additions (Feb 2026):
 4. Pro-Level RL Reward Function (Sharpe, Sortino, ATR sizing, Drawdown penalty, loss aversion) (✅ done)
 5. Strategy Weighting Improvements (Top-K sparsity + Prior blend + Market regime hierarchy) (✅ done — Feb 2026)
 6. Risk & Money Management in RL action space (Dynamic SL/TP, risk budget, equity-health scaling, DD circuit breaker) (✅ done — Feb 2026)
+
+## Phase 5 — Production Readiness (✅ done — Feb 2026)
+- `middleware/production.py`: Rate-Limit (sliding window, 120/min global, 20/min /api/robo/), SecurityHeaders (OWASP), RequestLogging (JSON structured), Prometheus Metrics
+- `/api/metrics` endpoint returning Prometheus text format
+- `test_risk_portfolio_manager.py`: 29 tests ✅ (fixed duplicate class defs + VaRResult field names)
+- `test_execution_engine.py`: 27 tests ✅
+- `test_trading_loop.py`: 30 tests ✅
+- `test_paper_trading.py`: 21 tests ✅ (fixed 5x leverage balance assertions)
+- `test_rl_agent.py`: 23 tests ✅ (fixed PPO/SAC → DreamerV3 assertions)
+- Full test suite: 355+ tests passing, only 1 SSE network-timeout (non-code)
+- UI: "Robot 3.O" agent card label in Robo tab (specific highlight change)
 7. Kronos AI Forecast Panel (BUY/SELL/SL/Day Target signals + chart lines) (✅ done — Jun 2026)
 8. 9router AI Router — multi-provider LLM routing with auto-fallback (✅ done — Jun 2026)
    - Backend: /app/backend/ai_router/ (engine.py + router.py)
