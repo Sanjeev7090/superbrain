@@ -1107,6 +1107,20 @@ def _robo_worker(prefs: UserPreferences):
                         dtarget = prefs.daily_profit_target
                         _state["daily_target_pct"] = (dpnl / dtarget * 100) if dtarget > 0 else 0.0
 
+                    # ── Adaptive Learning: feed trade outcome to Robot 3.0 learner ──
+                    try:
+                        from .adaptive_learner import learner as _learner
+                        with _lock:
+                            disc = _state.get("agent_discussion") or {}
+                        _learner.record_trade_outcome(
+                            ticker        = prefs.ticker,
+                            trade_signal  = open_trade.get("direction", "BUY"),
+                            outcome       = "WIN" if pnl >= 0 else "LOSS",
+                            agent_signals = disc.get("agent_agreement_map", {}),
+                        )
+                    except Exception as _le:
+                        logger.debug("[Orchestrator] Learner feedback: %s", _le)
+
                     logger.info(
                         "[RoboOrchestrator] Trade CLOSED | %s | P&L: ₹%.2f | Reason: %s",
                         close_reason, pnl, close_reason

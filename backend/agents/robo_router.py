@@ -815,3 +815,47 @@ async def get_active_stocks(limit: int = Query(25, ge=5, le=50)):
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
+
+# ─── 21. GET /learning-state ──────────────────────────────────────────────────
+@robo_router.get("/learning-state")
+async def get_learning_state():
+    """
+    GET Robot 3.0 Adaptive Learning Engine state.
+
+    Returns current dynamic agent weights (evolved from price validation
+    and trade outcomes), accuracy scores per agent, Kronos teacher
+    alignment, and recent weight changes.
+
+    This is the 'brain improvement log' — shows how Robot 3.0 has
+    self-optimised since the last reset.
+    """
+    try:
+        from .adaptive_learner import learner
+        state = learner.get_state()
+        return {
+            "success":   True,
+            "learning":  state,
+            "disclaimer": DISCLAIMER,
+        }
+    except Exception as exc:
+        logger.exception("[robo_router] learning-state failed")
+        return {"success": False, "error": str(exc)}
+
+
+# ─── 22. POST /learning-reset ─────────────────────────────────────────────────
+@robo_router.post("/learning-reset")
+async def reset_learning():
+    """
+    POST reset all adaptive weights back to base (factory defaults).
+    Use when you want Robot 3.0 to start fresh.
+    """
+    try:
+        from .adaptive_learner import learner
+        learner.reset_to_base()
+        return {
+            "success": True,
+            "message": "Adaptive learning reset to base weights.",
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+

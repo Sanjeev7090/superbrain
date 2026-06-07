@@ -1278,6 +1278,29 @@ class StrategyCollaborator:
         # ── Build consensus ────────────────────────────────────────────────
         discussion = self._build_consensus(ticker, scan_id, signals, capital, deep, t0)
 
+        # ── Record for Adaptive Learning (price validated after 30 min) ───
+        try:
+            from .adaptive_learner import learner as _learner
+            entry_price = 0.0
+            kronos_sig  = "HOLD"
+            kronos_conf = 50.0
+            for s in signals:
+                if s.entry > 0 and entry_price == 0:
+                    entry_price = s.entry
+                if s.agent_name == "KronosAI":
+                    kronos_sig  = s.signal
+                    kronos_conf = s.confidence
+            _learner.record_prediction(
+                ticker        = ticker,
+                entry_price   = entry_price,
+                consensus     = discussion.consensus,
+                agent_signals = discussion.agent_agreement_map,
+                kronos_signal = kronos_sig,
+                kronos_conf   = kronos_conf,
+            )
+        except Exception as _le:
+            logger.debug("[Collaborator] Learner record: %s", _le)
+
         # Cache result
         with self._lock:
             self._discussion_cache[cache_key] = discussion
@@ -1368,10 +1391,16 @@ class StrategyCollaborator:
         hold_count = sum(1 for s in signals if s.signal == "HOLD")
         total_agents = len(signals) or 1
 
-        # Weighted score
-        total_weight = sum(AGENT_WEIGHTS.get(s.agent_name, 0.15) for s in signals) + 1e-8
+        # ── Weighted score using DYNAMIC weights from AdaptiveLearner ─────
+        try:
+            from .adaptive_learner import learner as _learner
+            _dyn_w = _learner.get_dynamic_weights()
+        except Exception:
+            _dyn_w = dict(AGENT_WEIGHTS)
+
+        total_weight = sum(_dyn_w.get(s.agent_name, 0.15) for s in signals) + 1e-8
         weighted_score = sum(
-            AGENT_WEIGHTS.get(s.agent_name, 0.15) * s.direction_score
+            _dyn_w.get(s.agent_name, 0.15) * s.direction_score
             for s in signals
         ) / total_weight
 
@@ -1421,15 +1450,33 @@ class StrategyCollaborator:
             "tech_composite_score":   agent_map.get("TechComposite", _hold_sig).direction_score / 100.0,
             "intraday_momentum":      agent_map.get("IntradayMomentum", _hold_sig).direction_score / 100.0,
             "agent_agreement_rate":   round(max(bull_count, bear_count, hold_count) / total_agents, 3),
+            # Adaptive learning context
+            "dynamic_weights_active": True,
         }
 
         # ── Dreamer V3 final signal ─────────────────────────────────────────
         dreamer_final  = consensus
         dreamer_conf   = consensus_conf
+
+        # Include adaptive learning context in reasoning
+        try:
+            from .adaptive_learner import learner as _learn
+            ls = _learn.get_state()
+            best_a  = ls.get("best_agent", "KronosAI")
+            best_a_acc = round(ls.get("accuracy_scores", {}).get(best_a, 50.0), 1)
+            learn_iter = ls.get("learning_iterations", 0)
+            learn_note = (
+                f" [Learning iter {learn_iter}: best agent={best_a} acc={best_a_acc}%]"
+                if learn_iter > 0 else ""
+            )
+        except Exception:
+            learn_note = ""
+
         dreamer_reason = (
             f"{bull_count} bull · {bear_count} bear · {hold_count} hold · "
             f"conviction {conviction_score:.0f}%. "
             f"Weighted score: {weighted_score:+.1f}/100. Confidence: {consensus_conf:.0f}%."
+            f"{learn_note}"
         )
 
         # ── Monte Carlo (run for best non-HOLD signal) ─────────────────────

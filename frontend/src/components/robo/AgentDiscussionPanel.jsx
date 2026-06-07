@@ -5,6 +5,7 @@ import {
   Search, Plus, X, Zap, TrendingUp, TrendingDown, Minus,
   RefreshCw, AlertTriangle, Activity, Target, Brain,
   ChevronDown, ChevronUp, Flame, BarChart2, Filter, ArrowUpDown,
+  Cpu, TrendingUp as Learn,
 } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -312,6 +313,185 @@ function MonteCarloCard({ mc }) {
   );
 }
 
+// ── Robot Learning Panel ─────────────────────────────────────────────────────
+function RobotLearningPanel({ learningState, onReset }) {
+  if (!learningState) return null;
+
+  const {
+    agent_weights, accuracy_scores, base_weights, weight_vs_base,
+    best_agent, learning_iterations, trade_outcomes_learned,
+    price_validations_done, overall_accuracy, pending_validations, recent_changes,
+  } = learningState;
+
+  const AGENTS = [
+    { name: 'KronosAI',         icon: '🔮', label: 'Kronos AI' },
+    { name: 'IntradayMomentum', icon: '⚡', label: 'Intraday' },
+    { name: 'TechComposite',    icon: '🔬', label: 'Technical' },
+    { name: 'Breakout15m',      icon: '📈', label: 'Breakout' },
+    { name: 'MiroFish',         icon: '🐟', label: 'MiroFish' },
+    { name: 'ActiveScanner',    icon: '📡', label: 'Scanner' },
+  ];
+
+  const isLearning = learning_iterations > 0;
+  const isActive   = pending_validations > 0 || learning_iterations > 0;
+
+  return (
+    <div
+      className="rounded-2xl p-3 space-y-3"
+      style={{ background: 'rgba(124,58,237,0.04)', border: '1px solid rgba(124,58,237,0.15)' }}
+      data-testid="robot-learning-panel"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Cpu size={11} className="text-violet-400" />
+          <span className="text-[9px] font-black text-violet-300 uppercase tracking-widest">
+            Robot 3.0 Self-Learning
+          </span>
+          {isActive && (
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"
+              title="Actively learning"
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[7px] text-zinc-600">
+            iter {learning_iterations}
+          </span>
+          <button
+            onClick={onReset}
+            className="text-[7px] text-zinc-700 hover:text-red-400 px-1.5 py-0.5 rounded border border-zinc-800"
+            data-testid="learning-reset-btn"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {/* Stats strip */}
+      <div className="grid grid-cols-4 gap-1 text-center">
+        {[
+          { l: 'Iterations', v: learning_iterations, c: '#a78bfa' },
+          { l: 'Trades Learnt', v: trade_outcomes_learned, c: '#10b981' },
+          { l: 'Price Valid.', v: price_validations_done, c: '#f59e0b' },
+          { l: 'Accuracy', v: `${overall_accuracy}%`, c: overall_accuracy >= 55 ? '#10b981' : '#ef4444' },
+        ].map(({ l, v, c }) => (
+          <div key={l} className="bg-zinc-900/50 rounded-xl p-1.5">
+            <p className="text-[7px] text-zinc-600 leading-tight">{l}</p>
+            <p className="text-[10px] font-black" style={{ color: c }}>{v}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Kronos Teacher line */}
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl"
+        style={{ background: 'rgba(124,58,237,0.08)', border: '1px solid rgba(124,58,237,0.2)' }}
+      >
+        <span className="text-base">🔮</span>
+        <div className="flex-1">
+          <p className="text-[8px] font-bold text-violet-300">Kronos AI — Teacher Signal</p>
+          <p className="text-[7px] text-zinc-600">
+            High-confidence Kronos signals correct other agents' weights
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] font-black text-violet-300">
+            {(agent_weights?.['KronosAI'] * 100 || 0).toFixed(1)}%
+          </p>
+          <p className="text-[7px]" style={{
+            color: (weight_vs_base?.['KronosAI'] || 0) >= 0 ? '#10b981' : '#ef4444'
+          }}>
+            {(weight_vs_base?.['KronosAI'] || 0) >= 0 ? '↑' : '↓'}
+            {Math.abs(((weight_vs_base?.['KronosAI'] || 0) * 100)).toFixed(1)}%
+          </p>
+        </div>
+      </div>
+
+      {/* Best agent badge */}
+      {best_agent && learning_iterations > 0 && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[7px] text-zinc-600">Best performing:</span>
+          <span
+            className="text-[7px] font-black px-1.5 py-0.5 rounded-full"
+            style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b' }}
+          >
+            {best_agent} — {(accuracy_scores?.[best_agent] || 50).toFixed(1)}% acc
+          </span>
+        </div>
+      )}
+
+      {/* Agent accuracy bars */}
+      <div className="space-y-1.5">
+        {AGENTS.map(({ name, icon, label }) => {
+          const acc    = accuracy_scores?.[name] || 50;
+          const wt     = (agent_weights?.[name] || 0) * 100;
+          const delta  = (weight_vs_base?.[name] || 0) * 100;
+          const isUp   = delta > 0.3;
+          const isDown = delta < -0.3;
+          const accColor = acc >= 60 ? '#10b981' : acc >= 45 ? '#f59e0b' : '#ef4444';
+          const isBest = name === best_agent && learning_iterations > 0;
+
+          return (
+            <div key={name} className="flex items-center gap-2" data-testid={`agent-learn-${name}`}>
+              <span className="text-[10px] w-4 flex-shrink-0">{icon}</span>
+              <span
+                className="text-[7px] font-bold w-14 flex-shrink-0"
+                style={{ color: isBest ? '#f59e0b' : '#71717a' }}
+              >
+                {label}{isBest ? ' ⭐' : ''}
+              </span>
+              {/* Accuracy bar */}
+              <div className="flex-1 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-700"
+                  style={{ width: `${acc}%`, background: accColor }}
+                />
+              </div>
+              <span className="text-[7px] font-mono w-7 text-right" style={{ color: accColor }}>
+                {acc.toFixed(0)}%
+              </span>
+              {/* Weight delta arrow */}
+              <span
+                className="text-[7px] font-black w-6 text-right"
+                style={{ color: isUp ? '#10b981' : isDown ? '#ef4444' : '#52525b' }}
+              >
+                {isUp ? '↑' : isDown ? '↓' : '—'}
+                {Math.abs(delta) > 0.3 ? Math.abs(delta).toFixed(1) : ''}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Recent weight changes */}
+      {recent_changes?.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[7px] text-zinc-700 uppercase tracking-widest font-bold">Recent changes</p>
+          {recent_changes.slice(-4).map((c, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[7px]">
+              <span>{c.trigger === 'trade' ? '💼' : c.trigger === 'kronos' ? '🔮' : '📊'}</span>
+              <span className="text-zinc-600">{c.agent}</span>
+              <span style={{ color: c.delta > 0 ? '#10b981' : '#ef4444' }}>
+                {c.delta > 0 ? '+' : ''}{(c.delta * 100).toFixed(2)}%
+              </span>
+              <span className="text-zinc-700 ml-auto">→ {(c.new_w * 100).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pending_validations > 0 && (
+        <p className="text-[7px] text-zinc-700 animate-pulse">
+          {pending_validations} prediction(s) awaiting price validation (~30 min)…
+        </p>
+      )}
+    </div>
+  );
+}
+
+
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────────
 export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }) {
   const [discussion,    setDiscussion]    = useState(null);
@@ -326,12 +506,20 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState(null);
+  const [learningState, setLearningState] = useState(null);
 
   // Filters & Sort
   const [filter,  setFilter]  = useState('all');   // all | high_vol | high_win | strong
   const [sortBy,  setSortBy]  = useState('score'); // score | win | volume | confidence
 
   const searchDebounceRef = React.useRef(null);
+
+  const fetchLearningState = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/robo/learning-state`).catch(() => ({ data: {} }));
+      if (res.data?.learning) setLearningState(res.data.learning);
+    } catch { /* silent */ }
+  }, []);
 
   const fetchDiscussion = useCallback(async () => {
     try {
@@ -346,7 +534,10 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
     } catch { /* silent */ }
   }, []);
 
-  React.useEffect(() => { fetchDiscussion(); }, [fetchDiscussion]);
+  React.useEffect(() => {
+    fetchDiscussion();
+    fetchLearningState();
+  }, [fetchDiscussion, fetchLearningState]);
 
   const handleScan = async (ticker = null) => {
     setScanLoading(true);
@@ -360,6 +551,7 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
       const poll = setInterval(async () => {
         attempts++;
         await fetchDiscussion();
+        if (attempts % 5 === 0) fetchLearningState();  // refresh learning every 10s
         if (attempts >= 20) clearInterval(poll);
       }, 2000);
     } catch (e) {
@@ -367,6 +559,14 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
     } finally {
       setScanLoading(false);
     }
+  };
+
+  const handleLearningReset = async () => {
+    try {
+      await axios.post(`${API}/robo/learning-reset`);
+      toast.success('Learning reset — weights back to factory defaults');
+      fetchLearningState();
+    } catch { toast.error('Reset failed'); }
   };
 
   const handleAddTicker = async () => {
@@ -461,7 +661,7 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
           )}
         </div>
         <button
-          onClick={fetchDiscussion}
+          onClick={() => { fetchDiscussion(); fetchLearningState(); }}
           className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-500 hover:text-white transition-all"
           data-testid="refresh-discussion-btn"
         >
@@ -745,6 +945,12 @@ export default function AgentDiscussionPanel({ capital = 100000, onSelectStock }
       {disc?.monte_carlo && Object.keys(disc.monte_carlo).length > 0 && (
         <MonteCarloCard mc={disc.monte_carlo} />
       )}
+
+      {/* ── Robot 3.0 Self-Learning Panel ────────────────────────────── */}
+      <RobotLearningPanel
+        learningState={learningState}
+        onReset={handleLearningReset}
+      />
     </div>
   );
 }
