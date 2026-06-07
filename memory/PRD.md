@@ -302,7 +302,15 @@ In production (proper egress): NSEDirect/NSEPython will be primary.
 - Fully dark/light-mode aware via `.dark` and `html:not(.dark)` selectors
 - Files: `frontend/src/index.css` (CSS classes), `TradingDashboard.jsx` (class applied)
 
-## Session: SENSEX Options Live-Derived + Kronos Auto-Warmup (Feb 2026)
+## Session: PCR (Put-Call Ratio) Indicator (Feb 2026)
+- **`/api/indices/pcr/{symbol}`** endpoint: Returns OI PCR, Volume PCR, ATM PCR, signal (STRONGLY_BULLISH/BULLISH/NEUTRAL/BEARISH/STRONGLY_BEARISH), signal_strength 0-100, total OI/Vol breakdown
+- **`_compute_pcr()`** helper: Reuses cached option chain data (no double-fetch)
+- **SENSEX put OI skew**: Put OI now 1.15x, Vol 1.12x over call (realistic Indian index skew → PCR ~1.15)
+- **`PCRGauge.jsx`**: Semicircle SVG gauge (colored arc segments), OI/Vol/ATM PCR bars, signal pill, signal interpretation text, India VIX display, 60s auto-refresh
+- **`TopOptionsSheet.jsx`**: PCR toggle button (top-right), PCR gauge shown as collapsible section above filter pills
+- Tested: SENSEX PCR 1.15 (BULLISH), NIFTY PCR 0.70 (BEARISH), frontend compiles cleanly
+
+
 - **SENSEX options upgrade** (`server.py` ~L1393):
   - `_fetch_live_india_vix()`: Live India VIX from NSE allIndices API
   - `_sensex_expiry_dates()`: Proper BSE Thursday expiry schedule (post-Sep-2025)

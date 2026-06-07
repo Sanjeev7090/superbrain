@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { X, CaretUp, CaretDown, Spinner } from '@phosphor-icons/react';
+import { X, CaretUp, CaretDown, Spinner, ChartBar } from '@phosphor-icons/react';
+import PCRGauge from './PCRGauge';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -15,6 +16,7 @@ const TopOptionsSheet = ({ symbol, name, onClose, onOptionSelect }) => {
   const [filter, setFilter] = useState('all'); // all | call | put
   const [sortBy, setSortBy] = useState('volume'); // volume | oi | change
   const [selectedExpiry, setSelectedExpiry] = useState(null);
+  const [showPCR, setShowPCR] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const intervalRef = useRef(null);
@@ -43,8 +45,7 @@ const TopOptionsSheet = ({ symbol, name, onClose, onOptionSelect }) => {
     fetchOptions();
     intervalRef.current = setInterval(() => fetchOptions(selectedExpiry), 60000);
     return () => clearInterval(intervalRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, filter, sortBy]);
+  }, [symbol, filter, sortBy]); // eslint-disable-line
 
   const handleExpiryChange = (exp) => {
     setSelectedExpiry(exp);
@@ -93,13 +94,24 @@ const TopOptionsSheet = ({ symbol, name, onClose, onOptionSelect }) => {
                 </span>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded transition-colors"
-              data-testid="close-options-sheet"
-            >
-              <X size={16} weight="bold" className="text-zinc-400" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowPCR(p => !p)}
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                  showPCR ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40' : 'bg-zinc-800/60 text-zinc-400 border border-white/10 hover:text-white'
+                }`}
+                data-testid="pcr-toggle-btn"
+              >
+                <ChartBar size={11} weight="bold" /> PCR
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1.5 hover:bg-white/10 rounded transition-colors"
+                data-testid="close-options-sheet"
+              >
+                <X size={16} weight="bold" className="text-zinc-400" />
+              </button>
+            </div>
           </div>
 
           {/* Expiry selector (for SENSEX — multiple Thursday expiries) */}
@@ -145,6 +157,13 @@ const TopOptionsSheet = ({ symbol, name, onClose, onOptionSelect }) => {
             </div>
           )}
 
+          {/* PCR Gauge — collapsible */}
+          {showPCR && (
+            <div className="mb-2">
+              <PCRGauge symbol={symbol} />
+            </div>
+          )}
+
           {/* Filter pills */}
           <div className="flex gap-1.5">
             {[
@@ -183,7 +202,7 @@ const TopOptionsSheet = ({ symbol, name, onClose, onOptionSelect }) => {
 
           {!loading && error && (
             <div className="py-8 text-center text-[#FF3D71] text-xs px-4">
-              <div className="font-semibold mb-1">Couldn't load options</div>
+              <div className="font-semibold mb-1">Couldn&apos;t load options</div>
               <div className="opacity-70">{error}</div>
             </div>
           )}
