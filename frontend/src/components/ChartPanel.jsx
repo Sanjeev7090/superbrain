@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import { createChart } from 'lightweight-charts';
-import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning } from '@phosphor-icons/react';
+import { ChartLine, TrendUp, TrendDown, PencilLine, Trash, Lightning, ArrowsOut, ArrowsIn } from '@phosphor-icons/react';
 import GrowwTradeModal from './GrowwTradeModal';
 import StrategyOverlay from './StrategyOverlay';
 import TimeframeLevels from './TimeframeLevels';
@@ -135,6 +135,19 @@ function computeSMCData(bars) {
     swings:   swings.slice(-40),
     obs:      obs.slice(-20),
     bosChoch: bosChoch.slice(-20),
+    pdZone:   (() => {
+      // Premium / Discount zone — from last confirmed swing high + low
+      const recentH = [...swings].reverse().find(s => s.type === 'high');
+      const recentL = [...swings].reverse().find(s => s.type === 'low');
+      if (!recentH || !recentL) return null;
+      const hi = recentH.price, lo = recentL.price;
+      if (hi <= lo) return null;
+      return {
+        hi, lo, eq: (hi + lo) / 2,
+        startTime: Math.min(recentH.startTime, recentL.startTime),
+        endTime:   Math.max(recentH.endTime,   recentL.endTime),
+      };
+    })(),
   };
 }
 
@@ -158,6 +171,7 @@ const ChartPanel = ({
   const smcDataRef   = useRef(null);
   const smcAnimRef   = useRef(null);
   const [smcActive, setSmcActive] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectMode, setSelectMode] = useState(null);
   const [showGannLines, setShowGannLines] = useState(true);
   const [lineExtension, setLineExtension] = useState(50);
@@ -521,6 +535,57 @@ const ChartPanel = ({
       ctx.restore();
     });
 
+    // ── 5. Premium / Discount Zones ───────────────────────────────
+    if (smc.pdZone) {
+      const pd  = smc.pdZone;
+      const x1  = toX(pd.startTime);
+      const x2  = toX(pd.endTime);
+      const yHi = toY(pd.hi);
+      const yEq = toY(pd.eq);
+      const yLo = toY(pd.lo);
+      if (x1 != null && x2 != null && yHi != null && yEq != null && yLo != null) {
+        const left = Math.min(x1, x2);
+        const wid  = Math.abs(x2 - x1);
+
+        // Premium zone (hi → eq): soft red
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,59,48,0.07)';
+        ctx.fillRect(left, yHi, wid, Math.abs(yEq - yHi));
+
+        // Discount zone (eq → lo): soft green
+        ctx.fillStyle = 'rgba(0,230,118,0.07)';
+        ctx.fillRect(left, yEq, wid, Math.abs(yLo - yEq));
+
+        // EQ midline
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath(); ctx.moveTo(left, yEq); ctx.lineTo(left + wid, yEq); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Top/bottom borders
+        ctx.strokeStyle = 'rgba(255,59,48,0.45)';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath(); ctx.moveTo(left, yHi); ctx.lineTo(left + wid, yHi); ctx.stroke();
+        ctx.strokeStyle = 'rgba(0,230,118,0.45)';
+        ctx.beginPath(); ctx.moveTo(left, yLo); ctx.lineTo(left + wid, yLo); ctx.stroke();
+
+        // Labels on right edge
+        const labelX = left + wid - 60;
+        ctx.font = 'bold 8px monospace';
+
+        ctx.fillStyle = 'rgba(255,100,100,0.80)';
+        ctx.fillText('PREMIUM', labelX, yHi + 10);
+
+        ctx.fillStyle = 'rgba(255,255,255,0.60)';
+        ctx.fillText('EQ', labelX, yEq - 3);
+
+        ctx.fillStyle = 'rgba(0,220,100,0.80)';
+        ctx.fillText('DISCOUNT', labelX, yLo - 3);
+        ctx.restore();
+      }
+    }
+
     ctx.restore();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -830,8 +895,34 @@ const ChartPanel = ({
 
   const handleDeleteGann = () => { onPivotSelect(null); clearGannLines(); setIsMovingMode(false); };
 
+  // Fullscreen: ESC to exit + chart resize trigger
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') setIsFullscreen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (chartRef.current && chartContainerRef.current) {
+        chartRef.current.applyOptions({
+          width:  chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
+        });
+      }
+    }, 60);
+    return () => clearTimeout(t);
+  }, [isFullscreen]);
+
   return (
-    <div className="flex flex-col h-full" data-testid="chart-panel">
+    <div
+      className={`flex flex-col ${
+        isFullscreen
+          ? 'fixed inset-0 z-[9999] bg-white dark:bg-[#0A0A0A]'
+          : 'h-full'
+      }`}
+      data-testid="chart-panel"
+    >
       {/* Chart Toolbar — scrollable row on mobile */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] shrink-0 gap-1 overflow-x-auto scrollbar-none transition-colors duration-200">
         <div className="flex items-center gap-1 flex-nowrap shrink-0">
@@ -937,6 +1028,16 @@ const ChartPanel = ({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          {/* Fullscreen toggle */}
+          <button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white shrink-0"
+            data-testid="fullscreen-btn"
+            title={isFullscreen ? 'Exit Fullscreen (ESC)' : 'Fullscreen'}
+          >
+            {isFullscreen ? <ArrowsIn size={13} weight="bold" /> : <ArrowsOut size={13} weight="bold" />}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-white/10 shrink-0" />
           {!pivotPoint && (
             <>
               <button
