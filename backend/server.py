@@ -11587,6 +11587,10 @@ app.include_router(mc_router)
 from ai_router.router import ai_router as _ai_router
 app.include_router(_ai_router)
 
+# ======================= ADVANCED TRADING (PER + Portfolio + Risk + Sentiment + Observability) =======================
+from rl_agent.advanced_router import advanced_router
+app.include_router(advanced_router)
+
 # DataManager cache stats endpoint
 from core.data_manager import dm as _dm
 from fastapi import APIRouter as _APIRouter

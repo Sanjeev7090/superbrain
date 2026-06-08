@@ -31,6 +31,15 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal
 
+# ─── Advanced modules (lazy-imported to avoid circular deps) ──────────────────
+try:
+    from .per_buffer    import PrioritizedReplayBuffer
+    from .risk_reward   import RiskAdjustedRewardEngine, dynamic_kelly, compute_cvar
+    _PER_AVAILABLE = True
+except ImportError:
+    _PER_AVAILABLE = False
+    logger.warning("PER / RiskReward modules not available — using uniform replay")
+
 logger = logging.getLogger(__name__)
 
 MODELS_DIR = Path(__file__).parent / "models"
@@ -82,10 +91,36 @@ _state: Dict = {
     "critic_loss":      0.0,
     "kronos_active":    False,
     "kronos_bonus":     0.0,
+    # PER buffer stats
+    "per_enabled":      False,
+    "per_size":         0,
+    "per_beta":         0.4,
+    "per_max_priority": 1.0,
+    # Risk-adjusted reward
+    "risk_reward_mode": False,
+    "rr_sharpe":        0.0,
+    "rr_cvar_penalty":  0.0,
+    "rr_kelly_align":   0.0,
+    "rr_drawdown":      0.0,
+    # Continuous training
+    "continuous_mode":  False,
+    "continuous_cycles": 0,
 }
 
 _stop_evt    = threading.Event()
 _train_thread: threading.Thread = None
+
+# ─── PER Buffer global (shared across training runs) ──────────────────────────
+_per_buffer = None        # PrioritizedReplayBuffer or None
+_per_lock   = threading.Lock()
+
+# ─── Continuous training ──────────────────────────────────────────────────────
+_continuous_evt    = threading.Event()
+_continuous_thread: threading.Thread = None
+
+# ─── Risk-Reward engine (per ticker) ──────────────────────────────────────────
+_rr_engine = None         # RiskAdjustedRewardEngine or None
+_rr_state:  Dict = {}     # latest reward breakdown
 
 
 def _upd(**kw):
@@ -662,7 +697,19 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
 
         env    = TradingEnv(data=df_hist, ticker=ticker)
         agent  = DreamerV3Agent()
-        replay = ReplayBuffer(capacity=50_000)
+
+        # ── Use PER buffer if available ──
+        global _per_buffer, _rr_engine
+        if _PER_AVAILABLE:
+            with _per_lock:
+                if _per_buffer is None:
+                    _per_buffer = PrioritizedReplayBuffer(capacity=100_000)
+                replay = _per_buffer
+            _rr_engine = RiskAdjustedRewardEngine()
+            _upd(per_enabled=True, risk_reward_mode=True)
+        else:
+            replay = ReplayBuffer(capacity=50_000)
+            _upd(per_enabled=False, risk_reward_mode=False)
 
         model_path = str(MODELS_DIR / f"dreamer_{ticker.replace('.', '_')}.pt")
         if os.path.exists(model_path):
@@ -716,28 +763,69 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
                 next_obs, reward, terminated, truncated, info = env.step(action)
                 done = terminated or truncated
 
-                # Kronos reward shaping: bonus × signed trade direction
+                # ── Risk-adjusted reward shaping ──
                 trade_sig   = info.get("trade_signal", 0.0)
-                dir_align   = float(np.sign(trade_sig + 1e-8)) * kronos_feat[0]  # feat[0]=dir_score
-                shaped_rew  = reward + kronos_bonus * max(dir_align, 0.0)
+                position_sz = abs(float(trade_sig))    # proxy for position size
+                dir_align   = float(np.sign(trade_sig + 1e-8)) * kronos_feat[0]
+                kronos_shaped = kronos_bonus * max(dir_align, 0.0)
+
+                if _rr_engine is not None:
+                    kelly_f = dynamic_kelly(
+                        win_rate=max(0.3, _state.get("avg_reward_10", 0) / 10 + 0.5),
+                        avg_win=0.01, avg_loss=0.005,
+                    ) if _PER_AVAILABLE else 0.25
+                    shaped_rew, rr_breakdown = _rr_engine.compute(reward, position_sz, kelly_f)
+                    shaped_rew += kronos_shaped
+                    global _rr_state
+                    _rr_state = rr_breakdown
+                    _upd(
+                        rr_sharpe=rr_breakdown["sharpe_bonus"],
+                        rr_cvar_penalty=rr_breakdown["cvar_penalty"],
+                        rr_kelly_align=rr_breakdown["kelly_align"],
+                        rr_drawdown=rr_breakdown["drawdown"],
+                    )
+                else:
+                    shaped_rew = reward + kronos_shaped
 
                 replay.push(obs, action, shaped_rew, next_obs, float(done),
                             kronos_feat=kronos_feat)
+
+                # ── Update PER priorities after world-model update ──
+                if _PER_AVAILABLE and isinstance(replay, PrioritizedReplayBuffer):
+                    if len(replay) >= BATCH_SIZE and total_steps % UPDATE_EVERY == 0:
+                        batch = replay.sample(BATCH_SIZE)
+                        # batch[6] = IS weights, batch[7] = leaf indices
+                        obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b, is_w, leaves = batch
+                        wm_l  = agent.update_world_model((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+                        a_l, c_l = agent.update_actor_critic((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+                        # Use world-model loss as TD proxy for priority update
+                        td_errors = np.full(len(leaves), abs(wm_l) + 1e-6)
+                        replay.update_priorities(leaves, td_errors)
+                        per_s = replay.stats()
+                        _upd(
+                            timesteps_done=total_steps,
+                            wm_loss=round(float(wm_l), 6),
+                            actor_loss=round(float(a_l), 6),
+                            critic_loss=round(float(c_l), 6),
+                            per_size=per_s["size"],
+                            per_beta=per_s["beta"],
+                            per_max_priority=per_s["max_priority"],
+                        )
+                else:
+                    if len(replay) >= BATCH_SIZE and total_steps % UPDATE_EVERY == 0:
+                        batch = replay.sample(BATCH_SIZE)
+                        wm_l  = agent.update_world_model(batch)
+                        a_l, c_l = agent.update_actor_critic(batch)
+                        _upd(
+                            timesteps_done=total_steps,
+                            wm_loss=round(float(wm_l), 6),
+                            actor_loss=round(float(a_l), 6),
+                            critic_loss=round(float(c_l), 6),
+                        )
+
                 obs         = next_obs
                 ep_reward  += reward
                 total_steps += 1
-
-                # ── Training update ──
-                if len(replay) >= BATCH_SIZE and total_steps % UPDATE_EVERY == 0:
-                    batch = replay.sample(BATCH_SIZE)
-                    wm_l  = agent.update_world_model(batch)
-                    a_l, c_l = agent.update_actor_critic(batch)
-                    _upd(
-                        timesteps_done=total_steps,
-                        wm_loss=round(float(wm_l), 6),
-                        actor_loss=round(float(a_l), 6),
-                        critic_loss=round(float(c_l), 6),
-                    )
 
             # ── End of episode ──
             episode   += 1
@@ -1116,3 +1204,129 @@ def get_prediction(ticker: str) -> Dict:
             + (f" | Kronos ×{KRONOS_REFRESH.get(mode, 150)}-step" if kronos_active else "")
         ),
     }
+
+
+# ─── PER / Risk-Reward / Continuous — new public API ─────────────────────────
+
+def get_per_stats() -> Dict:
+    """Return PER buffer statistics."""
+    with _per_lock:
+        buf = _per_buffer
+    if buf is None:
+        return {"enabled": False, "message": "PER buffer not initialised — start training first"}
+    stats = buf.stats()
+    stats["enabled"] = True
+    return stats
+
+
+def get_risk_reward_state() -> Dict:
+    """Return latest risk-adjusted reward breakdown."""
+    global _rr_state
+    if not _rr_state:
+        return {"enabled": False, "message": "Risk-reward engine not active"}
+    return {"enabled": True, **_rr_state}
+
+
+def _continuous_worker(ticker: str):
+    """
+    Continuous online-learning loop — runs indefinitely until stopped.
+    Every 60 seconds: collect 200 steps of fresh data → train → save.
+    """
+    _upd(continuous_mode=True, continuous_cycles=0)
+    cycles = 0
+    while not _continuous_evt.is_set():
+        try:
+            from .trading_env import TradingEnv
+            model_path = str(MODELS_DIR / f"dreamer_{ticker.replace('.', '_')}.pt")
+            if not os.path.exists(model_path):
+                time.sleep(30)
+                continue
+
+            agent = DreamerV3Agent()
+            agent.load(model_path)
+            env   = TradingEnv(ticker=ticker)
+            global _per_buffer, _rr_engine
+
+            with _per_lock:
+                if _per_buffer is None and _PER_AVAILABLE:
+                    _per_buffer = PrioritizedReplayBuffer(capacity=100_000)
+                replay = _per_buffer if _per_buffer is not None else ReplayBuffer(10_000)
+
+            if _PER_AVAILABLE and _rr_engine is None:
+                _rr_engine = RiskAdjustedRewardEngine()
+
+            kfeat, kbonus = _get_kronos_features(ticker)
+            obs, _ = env.reset()
+
+            for step in range(200):
+                if _continuous_evt.is_set():
+                    break
+                action = agent.act(obs, kronos_feat=kfeat)
+                next_obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+
+                trade_sig   = info.get("trade_signal", 0.0)
+                dir_align   = float(np.sign(trade_sig + 1e-8)) * kfeat[0]
+                if _rr_engine is not None:
+                    shaped_rew, _ = _rr_engine.compute(reward, abs(trade_sig), 0.25)
+                    shaped_rew += kbonus * max(dir_align, 0.0)
+                else:
+                    shaped_rew = reward + kbonus * max(dir_align, 0.0)
+
+                replay.push(obs, action, shaped_rew, next_obs, float(done), kronos_feat=kfeat)
+                obs = next_obs if not done else env.reset()[0]
+
+                if len(replay) >= BATCH_SIZE:
+                    if _PER_AVAILABLE and isinstance(replay, PrioritizedReplayBuffer):
+                        b = replay.sample(BATCH_SIZE)
+                        obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b, is_w, leaves = b
+                        wm_l = agent.update_world_model((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+                        agent.update_actor_critic((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+                        replay.update_priorities(leaves, np.full(len(leaves), abs(wm_l) + 1e-6))
+                    else:
+                        b = replay.sample(BATCH_SIZE)
+                        agent.update_world_model(b)
+                        agent.update_actor_critic(b)
+
+            agent.save(model_path)
+            cycles += 1
+            _upd(
+                continuous_cycles=cycles,
+                timesteps_done=_state.get("timesteps_done", 0) + 200,
+            )
+            logger.info("Continuous cycle %d done for %s", cycles, ticker)
+
+        except Exception as exc:
+            logger.debug("Continuous loop error: %s", exc)
+
+        # Wait before next cycle
+        for _ in range(60):
+            if _continuous_evt.is_set():
+                break
+            time.sleep(1)
+
+    _upd(continuous_mode=False)
+    logger.info("Continuous training stopped for %s", ticker)
+
+
+def start_continuous(ticker: str) -> Dict:
+    global _continuous_thread
+    if _state.get("continuous_mode"):
+        return {"success": False, "message": "Continuous training already running"}
+
+    _continuous_evt.clear()
+    _continuous_thread = threading.Thread(
+        target=_continuous_worker,
+        args=(ticker,),
+        daemon=True,
+        name="dreamer-continuous",
+    )
+    _continuous_thread.start()
+    return {"success": True, "message": f"Continuous online learning started for {ticker}"}
+
+
+def stop_continuous() -> Dict:
+    _continuous_evt.set()
+    _upd(continuous_mode=False)
+    return {"success": True, "message": "Continuous training stop requested"}
+
