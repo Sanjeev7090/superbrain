@@ -236,6 +236,17 @@ Recent fork additions (Feb 2026):
 - Volume Profile section removed (now lives on chart)
 - Always-visible (no open/close toggle)
 
+## Session: SMC Auto Mark (Jun 2026)
+### ChartPanel.jsx
+- **SMC Auto Mark**: Auto-enabled on every stock select. Canvas overlay (z-index:4, pointer-events:none) draws 3 layers:
+  1. **Liquidity Lines** — Swing Highs (LH) and Lows (LL) as orange dashed lines extending 50 bars right (pivot 5,5 lookback)
+  2. **FVG Boxes** — Bullish (green, `low > high[2]`) and Bearish (red, `high < low[2]`) Fair Value Gaps with FVG+/FVG- labels; mitigated zones automatically filtered out
+  3. **Order Blocks** — Bullish (blue) and Bearish (orange) OBs: last candle before strong move; extends until entry bar
+- **SMC Toggle button** in chart toolbar (data-testid=`smc-toggle`) — gold border when active, default ON
+- Computation: `computeSMCData(bars)` — pure JS from Pine Script logic, runs on every stock data change
+- RAF animation loop syncs canvas with chart pan/zoom automatically
+- `index.js`: fixed pre-existing `@/index.css` → `./index.css` CRA import regression
+
 ## P0/P1/P2 Backlog
 
 ### P1 (Next)
