@@ -384,13 +384,21 @@ const TradingDashboard = () => {
       setSignal(null);
       if (selectedStock.type === 'CRYPTO') {
         // Map timeframe to crypto days
-        const daysMap = { '5M': 1, '10M': 1, '15M': 1, '30M': 1, '1H': 1, '4H': 1, '1D': 7, '1W': 30, '1M': 30, '6M': 180, '1Y': 365 };
+        const daysMap = {
+          '1MIN': 1, '2M': 1, '3M': 1, '5M': 1, '10M': 1, '15M': 1, '30M': 1, '45M': 1,
+          '1H': 1, '2H': 1, '4H': 1,
+          '1D': 7, '1W': 30,
+          '1MO': 30, '3MO': 90, '6MO': 180,
+          '1Y': 365,
+          // legacy
+          '1M': 30, '6M': 180,
+        };
         const days = daysMap[tf.label] || 7;
         setCryptoChartDays(days);
         fetchCryptoData(selectedStock.coin_id, days);
       } else if (selectedStock.type === 'OPTION' && selectedStock.selectedOption) {
         // Options support 1m / 5m / 15m intraday only (NSE chart-databyindex tick data)
-        const optIntervalMap = { '1MIN': 1, '5M': 5, '10M': 10, '15M': 15 };
+        const optIntervalMap = { '1MIN': 1, '2M': 2, '3M': 3, '5M': 5, '10M': 10, '15M': 15, '30M': 30, '45M': 45 };
         const ivm = optIntervalMap[tf.label] || 1;
         fetchOptionIntraday(selectedStock.selectedOption, ivm);
       } else {

@@ -177,24 +177,42 @@ const ChartPanel = ({
   const [lineExtension, setLineExtension] = useState(50);
   const [isMovingMode, setIsMovingMode] = useState(false);
   const [tfOpen, setTfOpen] = useState(false);
+  const tfDropdownRef = useRef(null);
   const [showTrade, setShowTrade] = useState(false);
   const [vpActive, setVpActive] = useState(false);
   const [vpTooltip, setVpTooltip] = useState(null);
   const { theme } = useTheme();
 
-  const timeframes = [
-    { multiplier: 1, timespan: 'minute', label: '1MIN' },
-    { multiplier: 5, timespan: 'minute', label: '5M' },
-    { multiplier: 10, timespan: 'minute', label: '10M' },
-    { multiplier: 15, timespan: 'minute', label: '15M' },
-    { multiplier: 30, timespan: 'minute', label: '30M' },
-    { multiplier: 1, timespan: 'hour', label: '1H' },
-    { multiplier: 4, timespan: 'hour', label: '4H' },
-    { multiplier: 1, timespan: 'day', label: '1D' },
-    { multiplier: 1, timespan: 'week', label: '1W' },
-    { multiplier: 1, timespan: 'day', label: '1M', days: 30 },
-    { multiplier: 1, timespan: 'day', label: '6M', days: 180 },
-    { multiplier: 1, timespan: 'week', label: '1Y', days: 365 },
+  const TF_GROUPS = [
+    { group: 'MINUTES', items: [
+      { multiplier: 1,  timespan: 'minute', label: '1MIN', displayName: '1 minute'   },
+      { multiplier: 2,  timespan: 'minute', label: '2M',   displayName: '2 minutes'  },
+      { multiplier: 3,  timespan: 'minute', label: '3M',   displayName: '3 minutes'  },
+      { multiplier: 5,  timespan: 'minute', label: '5M',   displayName: '5 minutes'  },
+      { multiplier: 10, timespan: 'minute', label: '10M',  displayName: '10 minutes' },
+      { multiplier: 15, timespan: 'minute', label: '15M',  displayName: '15 minutes' },
+      { multiplier: 30, timespan: 'minute', label: '30M',  displayName: '30 minutes' },
+      { multiplier: 45, timespan: 'minute', label: '45M',  displayName: '45 minutes' },
+    ]},
+    { group: 'HOURS', items: [
+      { multiplier: 1, timespan: 'hour', label: '1H',  displayName: '1 hour'  },
+      { multiplier: 2, timespan: 'hour', label: '2H',  displayName: '2 hours' },
+      { multiplier: 4, timespan: 'hour', label: '4H',  displayName: '4 hours' },
+    ]},
+    { group: 'DAYS', items: [
+      { multiplier: 1, timespan: 'day', label: '1D', displayName: '1 day' },
+    ]},
+    { group: 'WEEKS', items: [
+      { multiplier: 1, timespan: 'week', label: '1W', displayName: '1 week' },
+    ]},
+    { group: 'MONTHS', items: [
+      { multiplier: 1, timespan: 'day', label: '1MO', displayName: '1 month',  days: 30  },
+      { multiplier: 3, timespan: 'day', label: '3MO', displayName: '3 months', days: 90  },
+      { multiplier: 6, timespan: 'day', label: '6MO', displayName: '6 months', days: 180 },
+    ]},
+    { group: 'YEARS', items: [
+      { multiplier: 1, timespan: 'week', label: '1Y', displayName: '1 year', days: 365 },
+    ]},
   ];
 
   const clearGannLines = () => {
@@ -902,6 +920,16 @@ const ChartPanel = ({
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  // TF dropdown: close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (tfDropdownRef.current && !tfDropdownRef.current.contains(e.target))
+        setTfOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(() => {
       if (chartRef.current && chartContainerRef.current) {
@@ -926,31 +954,49 @@ const ChartPanel = ({
       {/* Chart Toolbar — scrollable row on mobile */}
       <div className="flex items-center justify-between px-2 py-1 border-b border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] shrink-0 gap-1 overflow-x-auto scrollbar-none transition-colors duration-200">
         <div className="flex items-center gap-1 flex-nowrap shrink-0">
-          {/* Compact TF trigger — mobile only */}
-          <button
-            onClick={() => setTfOpen(!tfOpen)}
-            className="md:hidden px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider bg-slate-900 dark:bg-white text-white dark:text-black flex items-center gap-1 shrink-0"
-            data-testid="tf-trigger"
-          >
-            {timeframe.label}
-            <span className="text-[8px]">{tfOpen ? '▴' : '▾'}</span>
-          </button>
-          {/* Timeframes — desktop always visible, mobile only when tfOpen */}
-          <div className={`${tfOpen ? 'flex' : 'hidden'} md:flex items-center gap-1 flex-nowrap shrink-0`}>
-          {timeframes.map((tf) => (
+          {/* TF Selector — TradingView style grouped dropdown */}
+          <div className="relative shrink-0" ref={tfDropdownRef}>
             <button
-              key={tf.label}
-              onClick={() => { onTimeframeChange(tf); setTfOpen(false); }}
-              className={`px-2 py-1 text-[10px] font-mono font-bold uppercase tracking-wider transition-all whitespace-nowrap min-w-[28px] ${
-                timeframe.label === tf.label
-                  ? 'bg-slate-900 dark:bg-white text-white dark:text-black'
-                  : 'text-slate-400 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-white active:text-slate-900 dark:active:text-white'
+              onClick={() => setTfOpen(p => !p)}
+              className={`px-2.5 py-1 text-[11px] font-mono font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all border shrink-0 ${
+                tfOpen
+                  ? 'bg-slate-900 dark:bg-white/15 text-white border-white/30'
+                  : 'bg-slate-900 dark:bg-white/8 text-white dark:text-zinc-100 border-white/15 hover:bg-slate-700 dark:hover:bg-white/15'
               }`}
-              data-testid={`tf-${tf.label}`}
+              data-testid="tf-trigger"
             >
-              {tf.label}
+              {timeframe.label}
+              <span className={`text-[8px] transition-transform duration-200 ${tfOpen ? 'rotate-180' : ''}`}>▾</span>
             </button>
-          ))}
+
+            {tfOpen && (
+              <div
+                className="absolute top-full left-0 mt-1 z-[300] bg-white dark:bg-[#1C1C1C] border border-slate-200 dark:border-white/10 shadow-2xl"
+                style={{ minWidth: 170, maxHeight: 420, overflowY: 'auto' }}
+              >
+                {TF_GROUPS.map(grp => (
+                  <div key={grp.group}>
+                    <div className="px-3 pt-2.5 pb-0.5 text-[9px] font-bold tracking-widest text-slate-400 dark:text-zinc-500 uppercase select-none">
+                      {grp.group}
+                    </div>
+                    {grp.items.map(tf => (
+                      <button
+                        key={tf.label}
+                        onClick={() => { onTimeframeChange(tf); setTfOpen(false); }}
+                        className={`w-full text-left px-3 py-[5px] text-[13px] font-medium transition-colors ${
+                          timeframe.label === tf.label
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-white/8'
+                        }`}
+                        data-testid={`tf-${tf.label}`}
+                      >
+                        {tf.displayName}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="w-px h-4 bg-slate-200 dark:bg-white/10 mx-1 shrink-0" />
           {/* Gann toggle */}
