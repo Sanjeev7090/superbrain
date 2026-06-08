@@ -216,13 +216,12 @@ async def reset_circuit():
 @advanced_router.get("/risk/approvals")
 async def get_approvals():
     try:
-        from observability.metrics_engine import get_pending_approvals, _approval_queue
-        with __import__('observability.metrics_engine', fromlist=['_lock'])._lock:
-            all_approvals = list(__import__(
-                'observability.metrics_engine', fromlist=['_approval_queue']
-            )._approval_queue)
+        from observability.metrics_engine import get_pending_approvals
+        import observability.metrics_engine as me
+        with me._lock:
+            all_approvals = list(me._approval_queue)
         return {
-            "pending": [a for a in all_approvals if a["status"] == "PENDING"],
+            "pending":  [a for a in all_approvals if a["status"] == "PENDING"],
             "resolved": [a for a in all_approvals if a["status"] != "PENDING"],
         }
     except Exception as exc:

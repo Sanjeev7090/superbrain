@@ -6,7 +6,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, Cell,
 } from 'recharts';
 import { Activity, Cpu, RefreshCw, Play, Square, Database, AlertTriangle } from 'lucide-react';
 
@@ -154,8 +154,11 @@ export default function ObservabilityPanel({ selectedStock }) {
               <p className="text-[10px] text-zinc-500 mt-2">Per-Trade P&L %</p>
               <ResponsiveContainer width="100%" height={80}>
                 <BarChart data={pnl_pts}>
-                  <Bar dataKey="v" fill="#3b82f6"
-                    cell={(entry) => <rect fill={entry.v >= 0 ? '#10b981' : '#ef4444'} />} />
+                  <Bar dataKey="v">
+                    {pnl_pts.map((entry, index) => (
+                      <Cell key={index} fill={entry.v >= 0 ? '#10b981' : '#ef4444'} />
+                    ))}
+                  </Bar>
                   <XAxis dataKey="i" hide />
                   <YAxis hide />
                 </BarChart>

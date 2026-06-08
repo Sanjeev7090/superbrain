@@ -1,388 +1,135 @@
 # Gann Trader — PRD & Architecture
 
 ## Original Problem Statement
-Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangGraph multi-agent AI, Multi-TF Scanner, Weighted Confluence Scoring, Hybrid VWAP+TWAP strategy, RL Agent (PPO/SAC), Visualization & UX Next Level.
+Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangGraph multi-agent AI, Multi-TF Scanner, Weighted AI Signals, Phase 4 Robo-Trader UI, SENSEX options, PCR Gauge. Build an institutional-grade algorithmic trading dashboard for NSE/BSE.
 
-Recent fork additions (Feb 2026):
-1. Fix search failures (✅ done)
-2. Paper trading default balance → ₹50,000 (✅ done)
-3. Fix matplotlib RL issue (✅ done)
-4. Pro-Level RL Reward Function (Sharpe, Sortino, ATR sizing, Drawdown penalty, loss aversion) (✅ done)
-5. Strategy Weighting Improvements (Top-K sparsity + Prior blend + Market regime hierarchy) (✅ done — Feb 2026)
-6. Risk & Money Management in RL action space (Dynamic SL/TP, risk budget, equity-health scaling, DD circuit breaker) (✅ done — Feb 2026)
+## User Personas
+- Retail traders using NSE/BSE (primary)
+- Algo traders who want ML-based signals
+- Portfolio managers wanting multi-asset optimization
 
-## Phase 5 — Production Readiness (✅ done — Feb 2026)
-- `middleware/production.py`: Rate-Limit (sliding window, 120/min global, 20/min /api/robo/), SecurityHeaders (OWASP), RequestLogging (JSON structured), Prometheus Metrics
-- `/api/metrics` endpoint returning Prometheus text format
-- `test_risk_portfolio_manager.py`: 29 tests ✅ (fixed duplicate class defs + VaRResult field names)
-- `test_execution_engine.py`: 27 tests ✅
-- `test_trading_loop.py`: 30 tests ✅
-- `test_paper_trading.py`: 21 tests ✅ (fixed 5x leverage balance assertions)
-- `test_rl_agent.py`: 23 tests ✅ (fixed PPO/SAC → DreamerV3 assertions)
-- Full test suite: 355+ tests passing, only 1 SSE network-timeout (non-code)
-- UI: "Robot 3.O" agent card label in Robo tab (specific highlight change)
-7. Kronos AI Forecast Panel (BUY/SELL/SL/Day Target signals + chart lines) (✅ done — Jun 2026)
-8. 9router AI Router — multi-provider LLM routing with auto-fallback (✅ done — Jun 2026)
-   - Backend: /app/backend/ai_router/ (engine.py + router.py)
-   - Emergent LLM as primary provider (Claude/GPT/Gemini — free via Emergent key)
-   - OpenCode Free (via 9router) as secondary (disabled by default, needs local 9router setup)
-   - All AI features (MiroFish, GPT Analysis, Ensemble) auto-route through this
-   - Frontend tab removed from UI (per user request) but backend APIs intact
-   - ESLint fetchSignal missing dependency fixed (useCallback)
-9. Full 45-model analysis in AI Ensemble (✅ done — Jun 2026)
-   - All 45 models from 9router/OpenCode repo numbered 1-45
-   - 11/45 work via Emergent key (Claude Opus/Sonnet/Haiku + GPT 5.x)
-   - Remaining 34 show "Setup 9router" (need OpenCode auth)
-   - Parallel threading (asyncio.to_thread) — response in ~22s
-   - Each row: SIGNAL | ENTRY | SL | T1 | Conf | click to expand
+## Core Stack
+- **Backend**: FastAPI + MongoDB + Python RL/ML
+- **Frontend**: React + Craco + lightweight-charts + Recharts + Tailwind
+- **Build**: Craco (webpack aliases)
+- **3rd Party**: Emergent LLM Key (GPT-4o), yFinance, NSE scraping (curl_cffi)
 
-## RL Environment Spec (updated Feb 2026)
-- **Action space:** Box[-1, 1] shape (16,)
-  - dims 0–11: strategy weight adjustments → softmax → Top-K=5 sparsity → 10% prior blend
-  - dim 12: trade signal
-  - dim 13: stop-loss ATR multiplier [0.5, 5.0]
-  - dim 14: take-profit ATR multiplier [1.0, 8.0]
-  - dim 15: risk-budget exposure [0.05, 0.50]
-- **Observation space:** Box[-10, 10] shape (38,)
-  - OHLCV (5) + tech indicators (10) + strategy weights (12) + position state (8) + regime/equity-health/SL-distance (3)
-- **Hierarchical RL:** market regime (uptrend/sideways/downtrend) gates counter-trend trades
-- **Money Management:** vol-targeted exposure × risk-budget × equity-health, intra-bar SL/TP triggers, 10% account-DD circuit breaker
+---
 
-## App Overview
-**Gann Trader NSE** — React + FastAPI + MongoDB full-stack technical analysis platform for NSE/BSE trading.
+## What's Been Implemented
 
-## Architecture
-```
-/app
-├── backend/
-│   ├── server.py              (11,300+ line main API server)
-│   ├── mirofish_langgraph.py  (LangGraph multi-agent AI)
-│   ├── execution/
-│   │   └── hybrid_executor.py (Hybrid VWAP+TWAP)
-│   └── rl_agent/
-│       ├── trading_env.py     (Gymnasium environment)
-│       ├── rl_trainer.py      (PPO/SAC training manager)
-│       └── rl_router.py       (FastAPI RL endpoints)
-└── frontend/
-    └── src/components/
-        ├── TradingDashboard.jsx   (Main routing)
-        ├── MultiTFScannerModal.jsx
-        ├── HybridVWAPAnalysis.jsx
-        ├── DemonAnalysis.jsx
-        ├── RLAgentPanel.jsx       (RL Agent with AI Rebalance)
-        ├── VisualizeModal.jsx     (Heatmaps + Network)
-        ├── Gann3DPanel.jsx        (Three.js 3D charts)
-        ├── VoiceCommandSystem.jsx (Web Speech API)
-        └── WorkspacePanel.jsx     (react-grid-layout workspace)
-```
-
-## Key Implemented Features (as of 2026-05-26)
-
-### Phase 1 — Core App
-- Dark/Light mode toggle
+### Phase 1 — Foundation (Early Sessions)
+- Dark/light theme toggle
 - Mobile responsive layout
-- LangGraph MiroFish multi-agent AI (SSE streaming)
-- Multi-TF + Multi-Asset Scanner (`/api/stock-finder/scan-mtf`)
-- Weighted Confluence Scoring (`/api/auto-scan/{ticker}`)
-- Hybrid VWAP+TWAP execution strategy
-- DEMON strategy (fully integrated)
+- NSE stock search + live quotes
+- Interactive chart (lightweight-charts)
+- Technical indicators (RSI, MACD, BB, etc.)
 
-### Phase 2 — RL Agent (2026-05-26)
-- PPO and SAC algorithms (stable-baselines3 2.8.0)
-- Training modes: Historical / Live / Hybrid
-- Custom Gymnasium environment (TradingEnv)
-- Strategy weight optimizer + direct trade signals
-- Reward curve chart (recharts)
-- **AI Rebalance** button with confidence score (circular gauge)
-- Before/after weight delta table
+### Phase 2 — AI Signals
+- MiroFish LangGraph multi-agent orchestration
+- Multi-Timeframe Scanner
+- Weighted AI Signals aggregator
+- SMC Canvas Overlay (FVG, Liquidity, Order Blocks)
+- BOS/CHoCH detection
+- Premium/Discount Zones
+- Fullscreen chart mode
 
-### Phase 3 — Visualization & UX (2026-05-26)
-- **VISUAL button** → VisualizeModal
-  - Market Heatmap (recharts Treemap, sector data)
-  - Correlation Matrix (SVG, 15 NSE large caps, 3M period)
-  - Options Flow Network (D3 force graph, live OI data)
-- **3D button** → Gann3DPanel (Three.js WebGL)
-  - Gann Square of 9 Spiral helix
-  - Price Surface terrain mesh
-  - Astro Planetary Cycles (animated)
-- **Voice Commands** (Web Speech API, Indian English)
-  - "Load STOCK", "Run MiroFish", "Go to scanner", "Set alert at PRICE"
-- **WORKSPACE tab** (react-grid-layout)
-  - Draggable strategy cards
-  - Add/Save/Reset layout (localStorage)
+### Phase 3 — DreamerV3 Robo-Trader
+- DreamerV3 world model RL agent
+- Kronos Forecast integration
+- Adaptive Learning Engine
+- Paper trading mode
+- Ensemble AI cockpit
 
-### Phase 4 — Multi-AI Ensemble (Feb 2026)
-- Claude Sonnet 4.5 + Gemini 3 Pro + GPT-5.2 ensemble via Emergent LLM Key
-- Weighted voting consensus engine (`/api/ensemble/signal`)
-- AI-driven Gann 3D pattern optimization (`/api/ensemble/gann-optimize`)
-- **AI ENSEMBLE tab** with EnsembleCockpitPanel
+### Phase 4 — QUANT Module (Feb 2026) ← LATEST
+**Backend new files:**
+- `rl_agent/per_buffer.py` — Prioritized Experience Replay (SumTree, IS weights)
+- `rl_agent/risk_reward.py` — Risk-adjusted reward (Sharpe+CVaR+Kelly+Sortino)
+- `rl_agent/portfolio_optimizer.py` — Mean-Variance + Black-Litterman + Kelly + CVaR + Efficient Frontier + SOR
+- `data_providers/sentiment_provider.py` — Lexicon sentiment + Fear&Greed index
+- `observability/metrics_engine.py` — Circuit breakers, kill switch, anomaly detection, Prometheus
+- `rl_agent/advanced_router.py` — 22 new API endpoints under /api/advanced/*
 
-### Phase 5 — Sector Rotation Picker (Feb 2026)
-- **RISK section** header in right sidebar tab bar
-- **PICKER tab** → SectorRotationPicker component
-- RRG computation: 11 Nifty sectoral indices vs Nifty 50 benchmark
-  - JdK RS Ratio (EMA14/EMA26 of RS × 100)
-  - JdK RS Momentum (EMA of RS Ratio × 100)
-  - Quadrants: Leading / Improving / Weakening / Lagging
-- Mini RRG SVG chart with sector dots + trail visualization
-- Quadrant filter cards (click to filter sector list)
-- Expandable sector cards → top 8-12 stocks with live price/change/volume
-- 30-minute cache + manual Refresh button
-- "Add to Watchlist" / "Load in Scanner" per-stock buttons
+**Frontend new files:**
+- `PortfolioOptimizerPanel.jsx` — MV + BL + Kelly + CVaR + Efficient Frontier charts
+- `AdvancedRiskPanel.jsx` — Kill switch, circuit breakers, human-in-loop approval
+- `SentimentPanel.jsx` — News sentiment + Fear&Greed gauge
+- `ObservabilityPanel.jsx` — Equity curve, anomaly alerts, PER stats, continuous training toggle, Prometheus
+
+**UI Changes:**
+- New `⚡ QUANT` tab in TradingDashboard right panel
+- 4 sub-tabs: Portfolio / Risk / Sentiment / Observ.
+- TradingView-style grouped timeframe dropdown (with fixed positioning for mobile)
+
+---
 
 ## Key API Endpoints
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/stock-finder/scan-mtf` | GET (SSE) | Multi-TF scanner |
-| `/api/auto-scan/{ticker}` | GET | Weighted confluence score |
-| `/api/hybrid-vwap/analyze` | POST | Hybrid VWAP+TWAP |
-| `/api/demon/analyze` | POST | DEMON analysis |
-| `/api/rl-agent/train` | POST | Start PPO/SAC training |
-| `/api/rl-agent/status` | GET | Training status + weights |
-| `/api/rl-agent/predict` | POST | Get RL signal |
-| `/api/rl-agent/rebalance` | POST | AI Rebalance + confidence |
-| `/api/rl-agent/stop` | POST | Stop training |
-| `/api/rl-agent/reset` | POST | Reset + delete models |
-| `/api/viz/correlation-matrix` | GET | NSE stock correlations |
-| `/api/viz/options-network/{symbol}` | GET | Options flow network |
-| `/api/ensemble/signal` | POST | Multi-AI consensus signal |
-| `/api/ensemble/gann-optimize` | POST | AI Gann pattern optimization |
-| `/api/ensemble/status` | GET | Ensemble model status |
-| `/api/sector-picker/rrg` | GET | RRG quadrant data (11 sectors) |
-| `/api/sector-picker/stocks/{sector}` | GET | Top stocks for sector |
-| `/api/sector-picker/cache` | DELETE | Clear 30-min cache |
 
-## 3rd Party Integrations
-- OpenAI GPT-4o via emergentintegrations (LlmChat) — Emergent LLM Key
-- stable-baselines3 2.8.0 + gymnasium 1.2.3 + torch 2.12.0+cpu
-- three.js r184 (3D charts)
-- d3 (network graphs, heatmaps)
-- react-grid-layout 2.2.3 (workspace)
-- yfinance (market data)
-- nsepython (NSE options chain)
+### Core
+- `POST /api/orderflow/analyze`
+- `POST /api/mirofish/analyze`
+- `GET /api/robo/*`
+- `GET /api/kronos/*`
 
-## Session: DreamerV3 RL + Kronos Fix (Jun 2026)
+### QUANT (Phase 4)
+- `POST /api/advanced/portfolio/optimize` — MV / BL
+- `POST /api/advanced/portfolio/frontier` — Efficient frontier
+- `POST /api/advanced/portfolio/kelly` — Kelly per-asset
+- `POST /api/advanced/portfolio/cvar` — CVaR analysis
+- `POST /api/advanced/portfolio/hedge-suggest` — Options overlay
+- `POST /api/advanced/portfolio/smart-route` — Smart order routing
+- `GET  /api/advanced/risk/circuit-status`
+- `POST /api/advanced/risk/kill-switch`
+- `POST /api/advanced/risk/reset-circuit`
+- `GET  /api/advanced/risk/approvals`
+- `POST /api/advanced/risk/approve/{id}`
+- `GET  /api/advanced/sentiment/news`
+- `GET  /api/advanced/sentiment/market`
+- `GET  /api/advanced/sentiment/fear-greed`
+- `GET  /api/advanced/observability/metrics`
+- `GET  /api/advanced/observability/alerts`
+- `GET  /api/advanced/observability/prometheus`
+- `POST /api/advanced/observability/record-trade`
+- `POST /api/advanced/dreamer/continuous-toggle`
+- `GET  /api/advanced/dreamer/per-stats`
+- `GET  /api/advanced/dreamer/risk-reward`
 
-### DreamerV3 Robo-Trader — Phase 3 Execution Engine (✅ done — Jun 2026)
-- `execution_engine.py` — Full order lifecycle manager
-  - Modes: paper (simulate) / live (real Groww orders) / shadow (observe only)
-  - Bracket simulation with SL/TP monitoring
-  - Live mode: 30s confirmation delay + Groww SL-M orders
-  - Realistic brokerage: ₹20 flat + 0.1% STT
-  - MongoDB persistence in `robo_orders` collection
-- `trading_loop.py` — APScheduler autonomous scan loop
-  - Configurable 1–30 min interval
-  - Meta decision: DreamerV3 (60%) + Technical composite (40%)
-  - NSE market hours gate (09:15–15:30 IST, weekdays)
-  - EOD forced close at 15:15 IST
-  - Circuit breaker integration
-- 7 new API endpoints added to `robo_router.py`:
-  - POST `/api/robo/mode` — switch paper/live/shadow
-  - GET `/api/robo/positions` — open positions all modes
-  - GET `/api/robo/orders` — order history
-  - GET `/api/robo/loop-status` — APScheduler state
-  - POST `/api/robo/set-interval` — change scan interval
-  - POST `/api/robo/cancel-pending` — cancel PENDING live order
-  - POST `/api/robo/close-all` — emergency close all positions
-- `RoboDashboard.jsx` — Phase 3 panels added:
-  - Execution Mode Control (paper/shadow/live + live warning modal)
-  - Scan interval selector (1/5/10/15/30m)
-  - Trading Loop Status panel (cycle count, last/next scan, market hours)
-  - Open Positions table with close-all button
-  - Execution Order History table with P&L stats
+---
 
-### DreamerV3 RL Agent Replacement (✅ done — Jun 2026)
-- Replaced PPO/SAC (stable-baselines3) with DreamerV3 World Model RL
-- Architecture: RSSM (prior+posterior), Actor-Critic on imagined H-step trajectories, ReplayBuffer
-- `STATE_DIM=38, ACTION_DIM=16, LATENT_DIM=64, HIDDEN_DIM=256, HORIZON=15`
-- World model: RSSM KL + reward reconstruction loss
-- Actor: Gaussian + tanh squash, policy gradient loss
-- Critic: λ-return targets, soft target critic update (τ=0.005)
-- **Kronos Integration**: Kronos price-forecast direction used as reward shaping bonus during training
-  - Every 10 episodes: fetches Kronos OHLC forecast, computes direction+confidence → `bonus ≤ 0.15`
-  - Shapes reward toward Kronos-predicted market direction
-  - Frontend shows "KRONOS" pulsing badge when active
-- Frontend (`RLAgentPanel.jsx`): "DreamerV3" header, "World Model Losses" section (wm_loss/actor/critic), Kronos badge
-- Files: `backend/rl_agent/dreamer_trainer.py` (new), `rl_router.py` (updated), `RLAgentPanel.jsx` (updated)
+## DB Schema
+- `settings` — Robo orchestrator config (ticker, allocated_capital)
+- `robo_paper_trades` — Trade audit trail
 
-### Kronos safetensors Fix (✅ done — Jun 2026)
-- Root cause: `safetensors` package was missing from environment
-- Fix: `pip install safetensors==0.7.0` + added to requirements.txt
-- Kronos now loads: MODEL: KRONOS-SMALL (from NeoQuasar/Kronos-small on HuggingFace)
-- API tested: `/api/kronos/warmup` → `{loaded: true}`, `/api/kronos/forecast` → returns candles
+---
 
-## Session: VP Click Tooltip (Feb 2026)
-### ChartPanel.jsx
-- **VP Click Interaction**: Clicking any VP price bar shows a popup with:
-  - Price level, POC/VAH/VAL badge if applicable
-  - Buy volume (green bar), Sell volume (red bar)
-  - Delta (buy−sell), Total Volume, % of Peak
-  - ✕ close button; click same bin again to toggle off
-- **Hover Highlight**: Mouse hover highlights the current bin row on canvas
-- Canvas is now `cursor: crosshair` + `pointer-events: auto` when VP is active
+## Architecture Notes
+- `server.py` is monolithic (>10k lines) — modularization needed (tech debt)
+- `ChartPanel.jsx` is large (>1300 lines) — SMC logic should be extracted to hook
+- Observability state is in-memory (reset on restart) — acceptable for MVP
+- PER buffer is in-memory (reset on restart) — model saved to disk after each cycle
 
-## Session: Volume Profile on Chart + Footprint Restructure (Feb 2026)
-### ChartPanel.jsx
-- **Volume Profile Canvas Overlay**: Auto-fetches from `/api/orderflow/analyze` when stock is selected
-  - Canvas overlay (absolute, left:0, pointer-events:none) renders buy(green)/sell(red) bars per price bin
-  - RAF animation loop keeps bars in sync with chart zoom/pan
-  - `createPriceLine()` adds POC (orange), VAH (purple), VAL (cyan) dashed horizontal lines on chart
-  - 30-bin VP, 60-bar lookback, 400ms delay after chart settles
+---
 
-### OrderFlowPanel.jsx (now Footprint Panel)
-- Removed collapsible "ORDER FLOW" toggle header
-- Auto-fetches footprint on stock/data change (useEffect on selectedStock + stockData)
-- Shows ONLY: Signal header + Footprint candles + CVD+Delta chart
-- Volume Profile section removed (now lives on chart)
-- Always-visible (no open/close toggle)
+## Prioritized Backlog
 
-## Session: SMC Auto Mark (Jun 2026)
-### ChartPanel.jsx
-- **SMC Auto Mark**: Auto-enabled on every stock select. Canvas overlay (z-index:4, pointer-events:none) draws 3 layers:
-  1. **Liquidity Lines** — Swing Highs (LH) and Lows (LL) as orange dashed lines extending 50 bars right (pivot 5,5 lookback)
-  2. **FVG Boxes** — Bullish (green, `low > high[2]`) and Bearish (red, `high < low[2]`) Fair Value Gaps with FVG+/FVG- labels; mitigated zones automatically filtered out
-  3. **Order Blocks** — Bullish (blue) and Bearish (orange) OBs: last candle before strong move; extends until entry bar
-- **SMC Toggle button** in chart toolbar (data-testid=`smc-toggle`) — gold border when active, default ON
-- Computation: `computeSMCData(bars)` — pure JS from Pine Script logic, runs on every stock data change
-- RAF animation loop syncs canvas with chart pan/zoom automatically
-- **BOS / CHoCH layer** (Section 4 of SMC canvas):
-  - **BOS Bull** (green #00E676): uptrend mein prev swing high break → continuation
-  - **BOS Bear** (red #FF3B30): downtrend mein prev swing low break → continuation
-  - **CHoCH Bull** (cyan #00BFFF): downtrend mein high break → reversal signal
-  - **CHoCH Bear** (orange #FF6B00): uptrend mein low break → reversal signal
-  - Each event: horizontal broken-level line + label pill + directional arrow marker
-- `index.js`: fixed pre-existing `@/index.css` → `./index.css` CRA import regression
-
-## P0/P1/P2 Backlog
+### P0 (Critical)
+- [ ] server.py refactoring — split into domain routers
 
 ### P1 (Next)
-- LangGraph parallel agent execution (Technical/Volume/Sentiment/Risk run concurrently)
-- WhatsApp/Telegram share for MTF Scanner results
-- RL Agent: increase training timesteps for higher confidence scores
-- More training = better weight concentration = higher confidence %
+- [ ] PCR Alert system — popup when NIFTY/SENSEX PCR crosses threshold
+- [ ] Deep UX testing — MultiTF Scanner flows, win probability arc
+- [ ] Persist observability metrics to MongoDB
 
-### P2 (Future)
-- SENSEX options live data (BSE API integration)
-- Multiple expiry switch for options sheet
-- GannQSC Panel improvements
-- AR overlay for mobile (WebXR)
-- Advanced backtesting framework with P&L curves
+### P2 (Enhancement)
+- [ ] Real tick data (NSE WebSocket subscription)
+- [ ] Reddit/X sentiment (needs API keys)
+- [ ] WhatsApp/Telegram share for scan results
+- [ ] Multiple expiry switch for Options Sheet
+- [ ] Advanced backtesting with P&L curves
+- [ ] Real Grafana dashboard config export
+- [ ] Co-location / real broker API (Zerodha Kite, Angel One)
 
-## Notes for Future Agents
-- DEMON strategy: DO NOT REMOVE. User restored it after initial removal request.
-- LlmChat does NOT accept `provider` or `model` kwargs (causes 500 crash).
-- `api_router` is included at line 10055 in server.py. Add new endpoints AFTER using `@app.get("/api/...")` directly (not `@api_router.get`).
-- RL confidence = 0% at early training stage (uniform weights) — this is CORRECT behavior. Confidence increases with more episodes.
-
-## Data Layer Architecture (Added 2026-05-29)
-
-### New Structure
-```
-backend/
-├── data_providers/          # Four data source providers
-│   ├── nse_direct.py        # curl_cffi (Chrome impersonation) — primary for production
-│   ├── nse_python.py        # nsepython — secondary
-│   ├── groww.py             # growwapi — live prices/candles
-│   └── yfinance_fb.py       # yfinance — historical data fallback
-├── core/
-│   └── data_manager.py      # Unified DataManager singleton (dm) with TTL cache
-```
-
-### DataManager (dm) Priority
-- Quote: Groww > NSEDirect > NSEPython > yfinance
-- OHLCV Multi: yfinance (cached 30min weekly / 5min daily)
-- Option Chain: NSEDirect > NSEPython  
-- Top Gainers: NSEDirect > NSEPython
-- Indices: NSEDirect > NSEPython
-
-### Cache TTLs
-- Quote: 10s | Intraday: 30s | Daily: 5min | Weekly: 30min | Gainers: 60s | OI: 30s
-
-### API
-- GET /api/data-manager/status — cache stats + providers
-- DELETE /api/data-manager/cache — invalidate all cache
-
-### Updated Routers
-- sector_picker/router.py — dm.download_multi_sync()
-- moneycontrol/router.py — dm for gainers + ATM + performance
-- pece/router.py — dm.get_option_chain_sync() as primary
-
-### Note
-Container network blocks NSE IPs → yfinance primary in dev.
-In production (proper egress): NSEDirect/NSEPython will be primary.
-
-## Session: Liquid Glass UI (Jun 2026)
-- Added Apple-style liquid glass hover effect to header elements
-- `.liquid-glass-brand` on GANN TRADER logo: glass pill + backdrop-blur + scale(1.07) rotate(2deg) on hover
-- `.liquid-glass-light-btn` on VISUAL / 3D / HYBRID buttons: shimmer sweep + blur + scale(1.08) lift on hover  
-- `@keyframes liquid-shimmer`: 250% gradient sweep over element on hover
-- Fully dark/light-mode aware via `.dark` and `html:not(.dark)` selectors
-- Files: `frontend/src/index.css` (CSS classes), `TradingDashboard.jsx` (class applied)
-
-## Session: PCR (Put-Call Ratio) Indicator (Feb 2026)
-- **`/api/indices/pcr/{symbol}`** endpoint: Returns OI PCR, Volume PCR, ATM PCR, signal (STRONGLY_BULLISH/BULLISH/NEUTRAL/BEARISH/STRONGLY_BEARISH), signal_strength 0-100, total OI/Vol breakdown
-- **`_compute_pcr()`** helper: Reuses cached option chain data (no double-fetch)
-- **SENSEX put OI skew**: Put OI now 1.15x, Vol 1.12x over call (realistic Indian index skew → PCR ~1.15)
-- **`PCRGauge.jsx`**: Semicircle SVG gauge (colored arc segments), OI/Vol/ATM PCR bars, signal pill, signal interpretation text, India VIX display, 60s auto-refresh
-- **`TopOptionsSheet.jsx`**: PCR toggle button (top-right), PCR gauge shown as collapsible section above filter pills
-- Tested: SENSEX PCR 1.15 (BULLISH), NIFTY PCR 0.70 (BEARISH), frontend compiles cleanly
-
-
-- **SENSEX options upgrade** (`server.py` ~L1393):
-  - `_fetch_live_india_vix()`: Live India VIX from NSE allIndices API
-  - `_sensex_expiry_dates()`: Proper BSE Thursday expiry schedule (post-Sep-2025)
-  - `_fetch_sensex_live_options()`: IV skew, Delta/Theta Greeks, 100-pt strikes, ±15 ATM range
-  - API returns `india_vix`, `is_live_derived=True`, 6 expiry dates (4 weekly + 2 monthly)
-- **TopOptionsSheet.jsx upgrade**:
-  - India VIX badge, "Live-Derived" badge, expiry switcher (Thursday buttons)
-  - Delta/Theta shown in option rows, 60s refresh
-- **Kronos auto-warmup** (`KronosForecastPanel.jsx`): 
-  - Auto-triggers `POST /kronos/warmup` when `modelStatus.loaded=false` before forecast
-  - Also handles 503 responses with auto-retry warmup
-
-
-- **Primary Ticker search** (`TargetCapitalSettings.jsx`): Plain input → stock autocomplete with `/api/stock/search`, dropdown shows ticker+name+exchange badge; selecting a stock also loads it in chart
-- **TOP PICKS → Chart load** (`AgentDiscussionPanel.jsx`): Clicking any TOP PICK now calls `onSelectStock` (searches ticker, gets full stock object, loads in chart) + triggers analysis scan
-- **Chart stock → Primary Ticker sync**: Already working via `RoboAdvisorDashboard`'s `useEffect` that syncs `selectedStock.ticker → settings.ticker`
-- **`onSelectStock` prop wiring**: `TradingDashboard` → `RoboAdvisorDashboard` → `AgentDiscussionPanel` + `TargetCapitalSettings`
-- **ESLint**: CRA webpack compiles cleanly (no warnings)
-
-
-- Fixed all 7 exhaustive-deps ESLint warnings in chart hooks:
-  - ChartPanel.jsx: 3 warnings (semiLogScale init, drawGannLines, handleChartClick)
-  - Gann3DPanel.jsx: 1 warning (canvasRef.current in cleanup — fixed by capturing to local variable)
-  - StrategyOverlay.jsx: 1 warning (multiple draw functions — eslint-disable)
-  - TimeframeLevels.jsx: 1 warning (clearLines — eslint-disable)
-  - hybrid/QSCChart.jsx: 1 warning (bars dep — eslint-disable)
-- 45-Model AI Ensemble routing: All 45 slots live via Emergent LLM Key (4 real calls distributed to 45 UI slots)
-- Budget optimization: prevents API exhaustion while maintaining 100% uptime
-
-## Session: Most Active + 15m Breakout (Feb 2026)
-### Backend (`/app/backend/server.py`)
-- **`_fetch_nse_most_active(limit=25)`** (~L1090): Hits NSE's `live-analysis-most-active-securities` API for both `index=volume` and `index=value`, interleaves and dedupes by ticker, 5-min cache. Uses existing `_get_nse_session()` (curl_cffi Chrome120 impersonation) to bypass NSE WAF.
-- **`run_mini_breakout(bars)`** (~L4873): Donchian-20 breakout + Volume ≥1.3× avg(20) + bullish/bearish candle in upper/lower 50% of range + EMA20 alignment. SL = entry ± ATR(14)×1.5. Targets = 1R/2R/3R based on risk distance. Returns ("BUY"|"SELL"|"WAIT", {entry, sl, targets}).
-- **`_STRATEGY_WEIGHTS`** (~L5570): Added `"15m Breakout": 10.0` → `_TOTAL_STRATEGY_WEIGHT` now 118.0.
-- **`_mtf_scan_stock`** (~L6094): Strategy list now includes `("15m Breakout", run_mini_breakout)` with confidence=80.
-- **`/api/multi-tf-scanner/scan`** (~L6189):
-  - `segment="most_active"`: dynamic universe = NSE Most Active top 25 (Volume+Value deduped); F&O fallback if NSE unreachable.
-  - `segment="breakout_15m"`: universe = Most Active ∪ F&O/BankNifty/FinNifty deduped (~80 stocks); forces `15m` into tf_list; streams ONLY results where `tf_signals["15m"]["signals"]` contains `"15m Breakout"`.
-- **`GET /api/nse/most-active?limit=N`** (new, ~L6256): Returns deduped Most Active list for UI preview.
-
-### Frontend (`/app/frontend/src/components/MultiTFScannerModal.jsx`)
-- `SEGMENTS` array extended with `{id:'most_active', label:'Most Active', pink}` and `{id:'breakout_15m', label:'15m Breakout', amber}` chips next to existing options.
-- Empty-state hints describe each new segment's behavior.
-- Footer weighted-confluence string now lists `15m Breakout(10%)`.
-
-### Verified end-to-end (live NSE during market)
-- `GET /api/nse/most-active?limit=10` → 200, returned IDEA, BSE, OLAELEC, ZEEL, RELIANCE, GTLINFRA, SBIN, YESBANK, ADANIENT, NETWORK18.
-- `SSE /api/multi-tf-scanner/scan?segment=most_active&timeframes=15m` → universe=25, OLAELEC fired `[Explosive Volume, 15m Breakout, AI Indicator]`.
-- `SSE /api/multi-tf-scanner/scan?segment=breakout_15m&timeframes=15m` → 80 scanned, 6 results (OLAELEC, TCS, ASIANPAINT, NESTLEIND, ADANIPORTS, FEDERALBNK) — all containing `15m Breakout` in 15m signals.
-
-
-## Session: VP Heatmap Buy/Sell Split per Level (Feb 2026)
-### ChartPanel.jsx
-- **Heatmap buy/sell per level**: Each cell top-half=green(buy), bottom-half=red(sell), proportional to ratio
-- Volume brightness: `alpha = 0.30 + (vol/maxVol)*0.70` — high-volume levels are most vivid
-- Dominant-side edge glow (right 1px strip) on levels with >30% of max volume
-- POC = white-hot center line + orange "H" marker
-- Voice search fixed: stale closure patched via `processCommandRef`; added Hindi patterns + simple ticker recognition
+### P3 (Backlog)
+- [ ] WebXR AR overlay for mobile
+- [ ] LangGraph parallel agent execution
+- [ ] Multi-account portfolio tracking
