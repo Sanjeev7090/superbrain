@@ -22,6 +22,70 @@ const fmtVol = n => {
   return Number(n).toFixed(0);
 };
 
+// ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
+function computeSMCData(bars) {
+  const n = bars.length;
+  if (n < 15) return { fvgs: [], swings: [], obs: [] };
+
+  const fvgs = [];
+  const obs  = [];
+
+  for (let i = 2; i < n; i++) {
+    // Bullish FVG: low[i] > high[i-2]
+    if (bars[i].low > bars[i - 2].high) {
+      const endIdx = Math.min(i + 20, n - 1);
+      let mitigated = false;
+      for (let j = i + 1; j <= endIdx; j++) {
+        if (bars[j].low < bars[i].low && bars[j].high > bars[i - 2].high) { mitigated = true; break; }
+      }
+      fvgs.push({
+        type: 'bull', top: bars[i].low, bottom: bars[i - 2].high, mitigated,
+        startTime: bars[i - 1].timestamp / 1000,
+        endTime: bars[endIdx].timestamp / 1000,
+      });
+      if (bars[i].close > bars[i].open)
+        obs.push({ type: 'bull', high: bars[i - 1].high, low: bars[i - 1].low,
+          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+    }
+    // Bearish FVG: high[i] < low[i-2]
+    if (bars[i].high < bars[i - 2].low) {
+      const endIdx = Math.min(i + 20, n - 1);
+      let mitigated = false;
+      for (let j = i + 1; j <= endIdx; j++) {
+        if (bars[j].high > bars[i].high && bars[j].low < bars[i - 2].low) { mitigated = true; break; }
+      }
+      fvgs.push({
+        type: 'bear', top: bars[i - 2].low, bottom: bars[i].high, mitigated,
+        startTime: bars[i - 1].timestamp / 1000,
+        endTime: bars[endIdx].timestamp / 1000,
+      });
+      if (bars[i].close < bars[i].open)
+        obs.push({ type: 'bear', high: bars[i - 1].high, low: bars[i - 1].low,
+          startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
+    }
+  }
+
+  // Swing high / low — pivot 5,5
+  const swings = [];
+  for (let i = 5; i < n - 5; i++) {
+    let isH = true, isL = true;
+    for (let j = i - 5; j <= i + 5; j++) {
+      if (j === i) continue;
+      if (bars[j].high >= bars[i].high) isH = false;
+      if (bars[j].low  <= bars[i].low)  isL = false;
+    }
+    const eIdx = Math.min(i + 50, n - 1);
+    if (isH) swings.push({ type: 'high', price: bars[i].high, startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000 });
+    if (isL) swings.push({ type: 'low',  price: bars[i].low,  startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000 });
+  }
+
+  return {
+    fvgs:   fvgs.filter(f => !f.mitigated).slice(-40),
+    swings: swings.slice(-40),
+    obs:    obs.slice(-20),
+  };
+}
+
 const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
   semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
@@ -37,6 +101,11 @@ const ChartPanel = ({
   const vpAnimRef = useRef(null);
   const vpPriceLinesRef = useRef([]);
   const vpHoverYRef = useRef(null);
+  // SMC Auto Mark refs
+  const smcCanvasRef = useRef(null);
+  const smcDataRef   = useRef(null);
+  const smcAnimRef   = useRef(null);
+  const [smcActive, setSmcActive] = useState(true);
   const [selectMode, setSelectMode] = useState(null);
   const [showGannLines, setShowGannLines] = useState(true);
   const [lineExtension, setLineExtension] = useState(50);
@@ -234,6 +303,114 @@ const ChartPanel = ({
     }
 
     ctx.restore();
+  }, []);
+
+  // ── SMC Canvas Draw ────────────────────────────────────────────
+  const drawSMCCanvas = useCallback(() => {
+    const canvas  = smcCanvasRef.current;
+    const chart   = chartRef.current;
+    const series  = candlestickSeriesRef.current;
+    const smc     = smcDataRef.current;
+    if (!canvas || !chart || !series || !smc) return;
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const W = container.clientWidth;
+    const H = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+      canvas.width  = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width  = `${W}px`;
+      canvas.style.height = `${H}px`;
+    }
+
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    const ts  = chart.timeScale();
+    const toX = t  => { try { return ts.timeToCoordinate(t); } catch { return null; } };
+    const toY = p  => series.priceToCoordinate(p);
+
+    // ── 1. Liquidity lines (Swing High / Low) ─────────────────
+    smc.swings.forEach(sw => {
+      const x1 = toX(sw.startTime);
+      const x2 = toX(sw.endTime);
+      const y  = toY(sw.price);
+      if (x1 == null || x2 == null || y == null) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,185,0,0.72)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255,185,0,0.85)';
+      ctx.font = 'bold 7px monospace';
+      const lbl = sw.type === 'high' ? 'LH' : 'LL';
+      ctx.fillText(lbl, Math.max(8, x1 - 14), y - 2);
+      ctx.restore();
+    });
+
+    // ── 2. FVG Boxes ──────────────────────────────────────────
+    smc.fvgs.forEach(fvg => {
+      const x1   = toX(fvg.startTime);
+      const x2   = toX(fvg.endTime);
+      const yTop = toY(fvg.top);
+      const yBot = toY(fvg.bottom);
+      if (x1 == null || x2 == null || yTop == null || yBot == null) return;
+      const left = Math.min(x1, x2);
+      const top  = Math.min(yTop, yBot);
+      const w    = Math.abs(x2 - x1);
+      const h    = Math.max(2, Math.abs(yBot - yTop));
+      ctx.save();
+      if (fvg.type === 'bull') {
+        ctx.fillStyle   = 'rgba(0,230,118,0.11)';
+        ctx.strokeStyle = 'rgba(0,230,118,0.85)';
+      } else {
+        ctx.fillStyle   = 'rgba(255,59,48,0.11)';
+        ctx.strokeStyle = 'rgba(255,59,48,0.85)';
+      }
+      ctx.lineWidth = 1;
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.fillStyle = fvg.type === 'bull' ? 'rgba(0,230,118,0.92)' : 'rgba(255,59,48,0.92)';
+      ctx.font = 'bold 8px monospace';
+      ctx.fillText(fvg.type === 'bull' ? 'FVG+' : 'FVG-', left + 3, top + 9);
+      ctx.restore();
+    });
+
+    // ── 3. Order Blocks ────────────────────────────────────────
+    smc.obs.forEach(ob => {
+      const x1 = toX(ob.startTime);
+      const x2 = toX(ob.endTime);
+      const yH = toY(ob.high);
+      const yL = toY(ob.low);
+      if (x1 == null || x2 == null || yH == null || yL == null) return;
+      const left  = Math.min(x1, x2);
+      const top   = Math.min(yH, yL);
+      const w     = Math.max(6, Math.abs(x2 - x1));
+      const h     = Math.max(2, Math.abs(yL - yH));
+      ctx.save();
+      if (ob.type === 'bull') {
+        ctx.fillStyle   = 'rgba(59,130,246,0.18)';
+        ctx.strokeStyle = 'rgba(59,130,246,0.85)';
+      } else {
+        ctx.fillStyle   = 'rgba(255,100,0,0.18)';
+        ctx.strokeStyle = 'rgba(255,100,0,0.85)';
+      }
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.fillStyle = ob.type === 'bull' ? 'rgba(59,130,246,0.9)' : 'rgba(255,100,0,0.9)';
+      ctx.font = 'bold 7px monospace';
+      ctx.fillText('OB', left + 2, top + 8);
+      ctx.restore();
+    });
+
+    ctx.restore();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchVolumeProfile = useCallback(async (bars, ticker) => {
@@ -487,6 +664,26 @@ const ChartPanel = ({
     return () => { if (vpAnimRef.current) cancelAnimationFrame(vpAnimRef.current); };
   }, [vpActive, drawVPCanvas]);
 
+  // ── SMC: compute when bars change ─────────────────────────────
+  useEffect(() => {
+    smcDataRef.current = null;
+    if (!stockData?.bars?.length) return;
+    smcDataRef.current = computeSMCData(stockData.bars);
+  }, [stockData]);
+
+  // ── SMC: animation loop ────────────────────────────────────────
+  useEffect(() => {
+    if (!smcActive) {
+      if (smcAnimRef.current) cancelAnimationFrame(smcAnimRef.current);
+      const c = smcCanvasRef.current;
+      if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0, 0, c.width, c.height); }
+      return;
+    }
+    const loop = () => { drawSMCCanvas(); smcAnimRef.current = requestAnimationFrame(loop); };
+    smcAnimRef.current = requestAnimationFrame(loop);
+    return () => { if (smcAnimRef.current) cancelAnimationFrame(smcAnimRef.current); };
+  }, [smcActive, drawSMCCanvas]);
+
   useEffect(() => {
     if (showGannLines && pivotPoint && stockData) {
       setTimeout(() => drawGannLines(pivotPoint, lineExtension), 50);
@@ -563,6 +760,19 @@ const ChartPanel = ({
           >
             <ChartLine size={12} weight="bold" />
             <span className="hidden sm:inline">GANN</span>
+          </button>
+          {/* SMC toggle */}
+          <button
+            onClick={() => setSmcActive(!smcActive)}
+            className={`px-2 py-1 text-[10px] font-bold uppercase tracking-wider transition-all whitespace-nowrap shrink-0 border ${
+              smcActive
+                ? 'text-[#F5A623] border-[#F5A623]/40 bg-[#F5A623]/8'
+                : 'text-zinc-500 border-transparent'
+            }`}
+            data-testid="smc-toggle"
+            title="SMC Auto Mark — FVG + Liquidity + Order Blocks"
+          >
+            SMC
           </button>
           {/* Log toggle */}
           <button
@@ -709,6 +919,17 @@ const ChartPanel = ({
             zIndex: 5,
             cursor: vpActive ? 'crosshair' : 'default',
             display: vpActive ? 'block' : 'none',
+          }}
+        />
+
+        {/* SMC Auto Mark Canvas — full chart overlay, pointer-events none */}
+        <canvas
+          ref={smcCanvasRef}
+          style={{
+            position: 'absolute', left: 0, top: 0,
+            zIndex: 4,
+            pointerEvents: 'none',
+            display: smcActive ? 'block' : 'none',
           }}
         />
 
