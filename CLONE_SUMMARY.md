@@ -211,7 +211,7 @@ OPENAI_API_KEY=sk-proj-[your-key]
 
 ### Frontend Environment (.env)
 ```
-REACT_APP_BACKEND_URL=https://multi-tf-scanner-2.preview.emergentagent.com
+REACT_APP_BACKEND_URL=https://robo-trader-ai-2.preview.emergentagent.com
 WDS_SOCKET_PORT=443
 ENABLE_HEALTH_CHECK=false
 ```
