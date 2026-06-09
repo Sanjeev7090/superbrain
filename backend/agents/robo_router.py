@@ -84,6 +84,12 @@ class SettingsRequest(BaseModel):
     mode: Optional[str] = Field(
         None, description="paper | live  (live applies 30% extra safety multiplier)"
     )
+    watchlist: Optional[list] = Field(
+        None, description="List of NSE/BSE tickers to scan in parallel (max 10)"
+    )
+    max_parallel_trades: Optional[int] = Field(
+        None, ge=1, le=5, description="Maximum concurrent open positions (1–5)"
+    )
 
 
 class StartRequest(BaseModel):
@@ -166,6 +172,8 @@ async def get_settings():
             "risk_tolerance":      state.get("risk_tolerance",      "moderate"),
             "mode":                state.get("mode",                "paper"),
             "auto_mode":           state.get("auto_mode",           False),
+            "watchlist":           state.get("watchlist",           []),
+            "max_parallel_trades": state.get("max_parallel_trades", 3),
         },
         "risk_profile":        risk_profile,
         "capital_state_vector": cap_state,
@@ -195,6 +203,8 @@ async def update_settings(req: SettingsRequest, bg: BackgroundTasks):
         allocated_capital   = req.allocated_capital,
         ticker              = req.ticker,
         risk_tolerance      = req.risk_tolerance,
+        watchlist           = req.watchlist,
+        max_parallel_trades = req.max_parallel_trades,
     )
     # Persist settings + audit record in background
     bg.add_task(orch.save_preferences_to_db)
@@ -891,3 +901,58 @@ async def reset_learning():
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 
+
+
+# ─── 23. GET /watchlist ───────────────────────────────────────────────────────
+@robo_router.get("/watchlist")
+async def get_watchlist():
+    """Get current multi-stock watchlist and parallel trade settings."""
+    state = orch.get_robo_state()
+    return {
+        "success":           True,
+        "watchlist":         state.get("watchlist", []),
+        "max_parallel_trades": state.get("max_parallel_trades", 3),
+        "primary_ticker":    state.get("ticker", orch.DEFAULT_TICKER),
+    }
+
+
+class WatchlistRequest(BaseModel):
+    watchlist:           list = Field(..., description="List of NSE/BSE tickers")
+    max_parallel_trades: int  = Field(3, ge=1, le=5, description="Max concurrent positions (1–5)")
+
+
+# ─── 24. POST /watchlist ──────────────────────────────────────────────────────
+@robo_router.post("/watchlist")
+async def update_watchlist(req: WatchlistRequest, bg: BackgroundTasks):
+    """
+    Update multi-stock watchlist and max parallel positions.
+
+    Example:
+        {
+            "watchlist": ["RELIANCE.NS", "TCS.NS", "INFY.NS"],
+            "max_parallel_trades": 3
+        }
+
+    Robot 3.0 will scan all tickers each cycle and open up to
+    max_parallel_trades simultaneous positions when conditions are met.
+    """
+    # Normalise tickers
+    clean = []
+    for t in req.watchlist[:10]:   # max 10 watchlist tickers
+        t = str(t).strip().upper()
+        if t and not t.endswith(".NS") and not t.endswith(".BO"):
+            t = t + ".NS"
+        if t:
+            clean.append(t)
+
+    result = orch.update_user_preferences(
+        watchlist           = clean,
+        max_parallel_trades = req.max_parallel_trades,
+    )
+    bg.add_task(orch.save_preferences_to_db)
+    return {
+        "success":             True,
+        "watchlist":           clean,
+        "max_parallel_trades": req.max_parallel_trades,
+        "message":             f"Watchlist updated: {len(clean)} stocks | Max parallel: {req.max_parallel_trades}",
+    }

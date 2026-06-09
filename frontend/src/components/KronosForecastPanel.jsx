@@ -68,6 +68,32 @@ const KronosForecastPanel = ({ selectedStock, timeframe = '1D' }) => {
 
   useEffect(() => { refreshStatus(); }, [refreshStatus]);
 
+  // ── Clear stale data when stock changes ─────────────────────────────────────
+  useEffect(() => {
+    // When selectedStock changes, clear old forecast & stats
+    setForecast(null);
+    setStats(null);
+    setError(null);
+    // Clear chart series
+    if (histSeriesRef.current) {
+      try { histSeriesRef.current.setData([]); } catch (_) {}
+    }
+    if (fcSeriesRef.current) {
+      try { fcSeriesRef.current.setData([]); } catch (_) {}
+      // Remove old price lines
+      if (priceLinesRef.current.length) {
+        priceLinesRef.current.forEach(pl => {
+          try { fcSeriesRef.current.removePriceLine(pl); } catch (_) {}
+        });
+        priceLinesRef.current = [];
+      }
+    }
+    if (volSeriesRef.current) {
+      try { volSeriesRef.current.setData([]); } catch (_) {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStock?.ticker]);
+
   // ── Chart init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || chartRef.current) return;

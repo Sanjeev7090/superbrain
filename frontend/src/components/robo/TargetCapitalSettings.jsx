@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { X, TrendingUp, Wallet, Shield, AlertTriangle, Search } from 'lucide-react';
+import { X, TrendingUp, Wallet, Shield, AlertTriangle, Search, Plus, Trash2, Layers } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -54,6 +54,14 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
   const [tickerResults, setTickerResults] = useState([]);
   const [tickerLoading, setTickerLoading] = useState(false);
 
+  // Watchlist state
+  const [watchlist,         setWatchlist]         = useState([]);
+  const [maxParallel,       setMaxParallel]        = useState(3);
+  const [wlInput,           setWlInput]            = useState('');
+  const [wlResults,         setWlResults]          = useState([]);
+  const [wlLoading,         setWlLoading]          = useState(false);
+  const wlDebounceRef = useRef(null);
+
   // Auto-preview on input change (debounced 600ms)
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -61,6 +69,14 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
     return () => clearTimeout(debounceRef.current);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.daily_profit_target, form.allocated_capital, form.risk_tolerance]);
+
+  // Load existing watchlist on mount
+  useEffect(() => {
+    axios.get(`${API}/robo/watchlist`).then(r => {
+      setWatchlist(r.data.watchlist || []);
+      setMaxParallel(r.data.max_parallel_trades || 3);
+    }).catch(() => {});
+  }, []);
 
   const fetchPreview = async () => {
     setPrevLoading(true);
@@ -98,6 +114,33 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
     return () => clearTimeout(timer);
   }, [tickerQuery]);
 
+  // Debounced watchlist ticker search
+  useEffect(() => {
+    if (wlInput.length < 1) { setWlResults([]); return; }
+    clearTimeout(wlDebounceRef.current);
+    wlDebounceRef.current = setTimeout(async () => {
+      setWlLoading(true);
+      try {
+        const res = await axios.get(`${API}/stock/search`, { params: { q: wlInput } });
+        setWlResults(res.data.results || []);
+      } catch { setWlResults([]); } finally { setWlLoading(false); }
+    }, 400);
+    return () => clearTimeout(wlDebounceRef.current);
+  }, [wlInput]);
+
+  const addToWatchlist = (ticker) => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) return;
+    const final = t.endsWith('.NS') || t.endsWith('.BO') ? t : t + '.NS';
+    if (!watchlist.includes(final)) {
+      setWatchlist(prev => [...prev, final]);
+    }
+    setWlInput('');
+    setWlResults([]);
+  };
+
+  const removeFromWatchlist = (t) => setWatchlist(prev => prev.filter(x => x !== t));
+
   const handleSelectTicker = (stock) => {
     setTickerQuery(stock.ticker);
     setForm(f => ({ ...f, ticker: stock.ticker }));
@@ -110,12 +153,18 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
     setSaveLoading(true);
     setError(null);
     try {
-      await axios.post(`${API}/robo/settings`, {
-        daily_profit_target: Number(form.daily_profit_target),
-        allocated_capital:   Number(form.allocated_capital),
-        ticker:              form.ticker,
-        risk_tolerance:      form.risk_tolerance,
-      });
+      await Promise.all([
+        axios.post(`${API}/robo/settings`, {
+          daily_profit_target: Number(form.daily_profit_target),
+          allocated_capital:   Number(form.allocated_capital),
+          ticker:              form.ticker,
+          risk_tolerance:      form.risk_tolerance,
+        }),
+        axios.post(`${API}/robo/watchlist`, {
+          watchlist:           watchlist,
+          max_parallel_trades: maxParallel,
+        }),
+      ]);
       onSave?.();
       onClose?.();
     } catch (e) {
@@ -285,6 +334,111 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* ── Multi-Stock Watchlist ─────────────────────────────────────── */}
+          <div className="border border-zinc-800 rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-zinc-900/50 border-b border-zinc-800">
+              <Layers size={12} className="text-violet-400" />
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                Parallel Trading Watchlist
+              </p>
+              <span className="ml-auto text-[9px] text-zinc-600">Max 10 tickers</span>
+            </div>
+            <div className="p-4 space-y-3">
+              {/* Max parallel trades picker */}
+              <div>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-wider mb-1.5 font-semibold">
+                  Max Parallel Positions
+                </p>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setMaxParallel(n)}
+                      data-testid={`parallel-btn-${n}`}
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-black border transition-all ${
+                        maxParallel === n
+                          ? 'bg-violet-600/20 border-violet-500/50 text-violet-300'
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700'
+                      }`}
+                    >
+                      {n}×
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] text-zinc-600 mt-1">
+                  Robot will open up to {maxParallel} simultaneous position{maxParallel > 1 ? 's' : ''} across watchlist stocks
+                </p>
+              </div>
+
+              {/* Watchlist chips */}
+              {watchlist.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {watchlist.map(t => (
+                    <span
+                      key={t}
+                      className="flex items-center gap-1 px-2 py-1 bg-violet-900/20 border border-violet-700/30 rounded-lg text-[10px] font-mono font-bold text-violet-300"
+                    >
+                      {t}
+                      <button
+                        onClick={() => removeFromWatchlist(t)}
+                        className="text-zinc-500 hover:text-red-400 transition-colors"
+                        data-testid={`remove-wl-${t}`}
+                      >
+                        <Trash2 size={9} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Add ticker input */}
+              <div className="relative">
+                <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 focus-within:border-violet-500 transition-colors">
+                  <Plus size={11} className="text-zinc-500 flex-shrink-0" />
+                  <input
+                    type="text"
+                    value={wlInput}
+                    onChange={e => setWlInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && wlInput.trim()) { addToWatchlist(wlInput); }
+                      if (e.key === 'Escape') { setWlInput(''); setWlResults([]); }
+                    }}
+                    placeholder="Add ticker (e.g. TCS, INFY.NS)..."
+                    className="flex-1 bg-transparent text-white text-xs font-mono outline-none placeholder-zinc-600"
+                    data-testid="watchlist-input"
+                  />
+                  {wlLoading && <span className="w-3 h-3 border border-zinc-600 border-t-violet-400 rounded-full animate-spin flex-shrink-0" />}
+                  {wlInput.trim() && (
+                    <button
+                      onClick={() => addToWatchlist(wlInput)}
+                      className="text-[9px] font-bold text-violet-400 hover:text-violet-300 whitespace-nowrap"
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+                {wlResults.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-900 border border-zinc-700 rounded-xl overflow-hidden z-50 max-h-40 overflow-y-auto shadow-2xl">
+                    {wlResults.slice(0, 6).map((stock, i) => (
+                      <button
+                        key={i}
+                        onClick={() => addToWatchlist(stock.ticker)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800 transition-colors border-b border-zinc-800/50 last:border-0"
+                      >
+                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded font-mono bg-emerald-900/30 text-emerald-400">{stock.exchange || 'NSE'}</span>
+                        <span className="text-xs font-mono font-bold text-white">{stock.ticker}</span>
+                        <span className="text-[9px] text-zinc-500 truncate ml-auto">{stock.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <p className="text-[9px] text-zinc-600 italic">
+                Primary ticker ({form.ticker || 'RELIANCE.NS'}) is always included automatically
+              </p>
             </div>
           </div>
 

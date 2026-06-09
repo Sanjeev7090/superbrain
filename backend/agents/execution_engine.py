@@ -54,7 +54,7 @@ DEFAULT_CONFIRM_SEC    = 30    # seconds: confirmation delay in live mode
 BROKERAGE_PCT          = 0.0003  # 0.03% one-way brokerage
 BROKERAGE_FLAT         = 20.0   # ₹20 flat per side (Groww)
 STT_EQUITY_PCT         = 0.001  # 0.1% STT on sell side (equity)
-MAX_OPEN_POSITIONS     = 1     # Phase 3: single open position at a time
+MAX_OPEN_POSITIONS     = 5     # Phase 4: up to 5 parallel positions (configurable per instance)
 
 MODE_PAPER  = "paper"
 MODE_LIVE   = "live"
@@ -141,6 +141,9 @@ class ExecutionEngine:
         self._mode    = MODE_PAPER
         self._confirm_delay_sec = DEFAULT_CONFIRM_SEC
 
+        # Max open positions (configurable, default 5)
+        self._max_open_positions: int = MAX_OPEN_POSITIONS
+
         # In-memory order store
         self._orders:     Dict[str, Order] = {}   # all orders (today)
         self._history:    List[Order]      = []   # closed orders (last 200)
@@ -205,6 +208,20 @@ class ExecutionEngine:
                 "PAPER MODE — No real orders placed."
             ),
         }
+
+    def set_max_positions(self, n: int) -> None:
+        """Set maximum concurrent open positions (1–10)."""
+        with self._lock:
+            self._max_open_positions = max(1, min(10, int(n)))
+        logger.info("[ExecEngine] Max open positions set to %d", self._max_open_positions)
+
+    def has_open_position_for(self, ticker: str) -> bool:
+        """Return True if there is already an OPEN or PENDING position for given ticker."""
+        with self._lock:
+            return any(
+                o.ticker == ticker and o.status in ("OPEN", "PENDING")
+                for o in self._orders.values()
+            )
 
     def set_confirmation_delay(self, seconds: int) -> None:
         with self._lock:
@@ -274,8 +291,8 @@ class ExecutionEngine:
                 1 for o in self._orders.values()
                 if o.status in ("OPEN", "PENDING")
             )
-            if open_count >= MAX_OPEN_POSITIONS:
-                return {"success": False, "error": "Max open positions reached — close existing first."}
+            if open_count >= self._max_open_positions:
+                return {"success": False, "error": f"Max open positions ({self._max_open_positions}) reached — close existing first."}
 
             min_conf = MIN_CONFIDENCE_LIVE if mode == MODE_LIVE else MIN_CONFIDENCE_PAPER
             if confidence < min_conf:

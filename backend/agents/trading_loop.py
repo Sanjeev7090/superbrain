@@ -243,16 +243,11 @@ class TradingLoop:
         """
         One full scan cycle. Thread-safe. Never raises — all errors caught.
 
-        Steps:
-          1. Market hours check
-          2. EOD management
-          3. Fetch live price & market context
-          4. Check open positions (SL/TP)
-          5. Circuit breaker check
-          6. DreamerV3 decision
-          7. Meta decision (DreamerV3 + technical)
-          8. Execute via ExecutionEngine
-          9. Update orchestrator state
+        Multi-stock parallel trading:
+          • Reads watchlist from _prefs (falls back to single _prefs.ticker)
+          • Scans each ticker independently
+          • Allows up to max_parallel_trades concurrent positions
+          • Each ticker gets independent DreamerV3 + technical analysis
         """
         cycle_id = f"C{self._cycle_count + 1:04d}"
         t_start  = time.perf_counter()
@@ -305,72 +300,85 @@ class TradingLoop:
             )
             if now_ist >= eod_cutoff and not self._eod_closed:
                 logger.info("[TradingLoop][%s] EOD cutoff — closing all positions", cycle_id)
-                live_price = self._fetch_price(prefs.ticker)
-                prices     = {prefs.ticker: live_price or 0.0}
-                engine.close_all_positions(prices, reason="EOD")
+                # Close all positions across all tickers
+                all_open = engine.get_open_positions()
+                if all_open:
+                    prices = {}
+                    for pos in all_open:
+                        tkr = pos.get("ticker", prefs.ticker)
+                        if tkr not in prices:
+                            p = self._fetch_price(tkr)
+                            prices[tkr] = p or pos.get("entry_price", 0.0)
+                    engine.close_all_positions(prices, reason="EOD")
                 self._eod_closed = True
                 _upd(open_trade=None, status="idle")
                 self._update_state("eod_closed", True)
                 self._update_state("last_cycle_status", "eod_close")
                 return
 
-            # ── Step 4: Fetch live price + market context ────────────────────
-            ctx = self._fetch_market_context(prefs.ticker)
-            live_price = ctx.get("price", 0.0)
+            # ── Step 4: Build ticker watchlist ───────────────────────────────
+            watchlist = list(prefs.watchlist) if prefs.watchlist else []
+            if prefs.ticker not in watchlist:
+                watchlist.insert(0, prefs.ticker)  # primary ticker always in list
+            max_parallel = getattr(prefs, 'max_parallel_trades', 3)
+            # Sync engine max positions
+            engine.set_max_positions(max_parallel)
 
-            if live_price <= 0:
-                logger.warning("[TradingLoop][%s] Price fetch failed — skipping cycle", cycle_id)
-                self._update_state("last_cycle_status", "price_fetch_failed")
-                return
-
-            # ── Step 5: Check open positions (SL/TP) ─────────────────────────
-            closed_positions = engine.check_positions(prefs.ticker, live_price)
-            for cp in closed_positions:
-                pnl = cp.get("pnl", 0.0) or 0.0
-                with _lock:
-                    _state["daily_pnl"]       += pnl
-                    _state["total_paper_pnl"] += pnl
-                    _state["total_trades"]    += 1
-                    _state["current_capital"] += pnl
-                    _state["peak_capital"]     = max(_state["peak_capital"],
-                                                      _state["current_capital"])
-                    if pnl >= 0:
-                        _state["win_trades"]         += 1
-                        _state["consecutive_losses"]  = 0
-                    else:
-                        _state["loss_trades"]         += 1
-                        _state["consecutive_losses"]  += 1
-                    _state["audit_trail"]  = ([cp] + _state["audit_trail"])[:100]
-                    _state["open_trade"]   = None
-                    target = _state.get("daily_profit_target") or prefs.daily_profit_target
-                    _state["daily_target_pct"] = (
-                        _state["daily_pnl"] / target * 100 if target > 0 else 0.0
-                    )
-                # Phase 5: Telegram notification for closed trade
-                try:
-                    from agents.telegram_notifier import notify_trade_closed, notify_daily_target_reached
-                    notify_trade_closed(cp)
-                    # Check if daily target reached
-                    with _lock:
-                        dpnl_now = _state.get("daily_pnl", 0.0)
-                        tgt_now  = _state.get("daily_profit_target") or prefs.daily_profit_target
-                    if dpnl_now >= tgt_now > 0:
-                        notify_daily_target_reached(dpnl_now, tgt_now)
-                except Exception:
-                    pass
-                logger.info("[TradingLoop][%s] Position closed | P&L=₹%.2f | reason=%s",
-                            cycle_id, pnl, cp.get("exit_reason", "?"))
+            # ── Step 5: Check ALL open positions (SL/TP) for ALL tickers ─────
+            all_open_before = engine.get_open_positions()
+            for pos in list(all_open_before):
+                tkr = pos.get("ticker", prefs.ticker)
+                price = self._fetch_price(tkr)
+                if price and price > 0:
+                    closed_positions = engine.check_positions(tkr, price)
+                    for cp in closed_positions:
+                        pnl = cp.get("pnl", 0.0) or 0.0
+                        with _lock:
+                            _state["daily_pnl"]       += pnl
+                            _state["total_paper_pnl"] += pnl
+                            _state["total_trades"]    += 1
+                            _state["current_capital"] += pnl
+                            _state["peak_capital"]     = max(_state["peak_capital"],
+                                                              _state["current_capital"])
+                            if pnl >= 0:
+                                _state["win_trades"]         += 1
+                                _state["consecutive_losses"]  = 0
+                            else:
+                                _state["loss_trades"]         += 1
+                                _state["consecutive_losses"]  += 1
+                            _state["audit_trail"] = ([cp] + _state["audit_trail"])[:100]
+                            target = _state.get("daily_profit_target") or prefs.daily_profit_target
+                            _state["daily_target_pct"] = (
+                                _state["daily_pnl"] / target * 100 if target > 0 else 0.0
+                            )
+                        # Update open_trade to remaining open positions
+                        remaining = engine.get_open_positions()
+                        _upd(open_trade=remaining[0] if remaining else None)
+                        # Telegram notification
+                        try:
+                            from agents.telegram_notifier import notify_trade_closed, notify_daily_target_reached
+                            notify_trade_closed(cp)
+                            with _lock:
+                                dpnl_now = _state.get("daily_pnl", 0.0)
+                                tgt_now  = _state.get("daily_profit_target") or prefs.daily_profit_target
+                            if dpnl_now >= tgt_now > 0:
+                                notify_daily_target_reached(dpnl_now, tgt_now)
+                        except Exception:
+                            pass
+                        logger.info("[TradingLoop][%s] Position closed | %s P&L=₹%.2f | reason=%s",
+                                    cycle_id, tkr, pnl, cp.get("exit_reason", "?"))
 
             # ── Step 6: Circuit breaker check ────────────────────────────────
             risk = _recalculate_risk(prefs)
             tripped, reason = _check_circuit_breakers(prefs, risk)
             if tripped:
-                prices = {prefs.ticker: live_price}
-                engine.close_all_positions(prices, reason="CIRCUIT_BREAKER")
+                all_open = engine.get_open_positions()
+                if all_open:
+                    prices = {pos.get("ticker", prefs.ticker): self._fetch_price(pos.get("ticker", prefs.ticker)) or pos.get("entry_price", 0.0) for pos in all_open}
+                    engine.close_all_positions(prices, reason="CIRCUIT_BREAKER")
                 _upd(circuit_breaker=True, circuit_reason=reason,
                      status="circuit_breaker", auto_mode=False, open_trade=None)
                 logger.warning("[TradingLoop][%s] CIRCUIT BREAKER: %s", cycle_id, reason)
-                # Phase 5: Telegram alert
                 try:
                     from agents.telegram_notifier import notify_circuit_breaker
                     notify_circuit_breaker(reason)
@@ -380,19 +388,7 @@ class TradingLoop:
                 self._update_state("last_cycle_status", "circuit_breaker")
                 return
 
-            # ── Step 7: Skip if already open position ─────────────────────────
-            open_pos = engine.get_open_positions()
-            if open_pos:
-                _upd(status="trading",
-                     open_trade=open_pos[0] if open_pos else None)
-                self._update_state("last_cycle_status", "holding_position")
-                logger.info("[TradingLoop][%s] Open position exists — monitoring only", cycle_id)
-                return
-
-            # ── Step 8: DreamerV3 decision ────────────────────────────────────
-            dreamer_dec = self._get_dreamer_decision_safe(prefs, risk)
-
-            # ── Step 9: RPM full recalculate ──────────────────────────────────
+            # ── Step 7: RPM full recalculate ──────────────────────────────────
             with _lock:
                 current_pnl   = _state.get("daily_pnl", 0.0)
                 daily_trades  = _state.get("daily_trades", 0)
@@ -403,100 +399,137 @@ class TradingLoop:
             )
             _upd(risk_profile=risk_profile)
 
-            # Check dynamic budget
             if risk_profile.get("should_stop_trading"):
                 logger.info("[TradingLoop][%s] RPM budget says STOP — skipping entry", cycle_id)
                 self._update_state("last_cycle_status", "budget_stop")
                 return
 
-            # ── Step 10: Meta decision ────────────────────────────────────────
-            meta = self._compute_meta_decision(dreamer_dec, ctx, risk_profile)
+            # ── Step 8: Multi-stock scan & execute ────────────────────────────
+            current_open_count = len(engine.get_open_positions())
+            entries_this_cycle = 0
+            last_signal = "HOLD"
+            last_conf   = 0
 
-            _upd(
-                current_decision    = {**dreamer_dec, "meta": meta},
-                dreamer_signal      = dreamer_dec.get("direction", 0.0),
-                dreamer_confidence  = dreamer_dec.get("confidence", 0),
-                dreamer_weights     = dreamer_dec.get("strategy_weights", {}),
-                dreamer_wm_loss     = dreamer_dec.get("wm_loss", 0.0),
-                last_decision_time  = datetime.now(timezone.utc).isoformat(),
-                status              = "scanning",
-            )
+            for ticker in watchlist:
+                # Stop if max parallel reached
+                if current_open_count + entries_this_cycle >= max_parallel:
+                    logger.info("[TradingLoop][%s] Max parallel (%d) reached — stopping scan",
+                                cycle_id, max_parallel)
+                    break
 
-            # ── Step 11: Execute ──────────────────────────────────────────────
-            signal     = meta.get("signal", "HOLD")
-            confidence = meta.get("confidence", 0)
+                # Skip if this ticker already has an open position
+                if engine.has_open_position_for(ticker):
+                    logger.debug("[TradingLoop][%s] %s already has open position — skipping",
+                                 cycle_id, ticker)
+                    continue
 
-            # Mode-aware confidence floor: paper 30%, live 50%
-            try:
-                from agents.execution_engine import MODE_LIVE as _MODE_LIVE
-                conf_floor = META_CONFIDENCE_LIVE if engine._mode == _MODE_LIVE else META_CONFIDENCE_FLOOR
-            except Exception:
-                conf_floor = META_CONFIDENCE_FLOOR
+                # Fetch market context for this ticker
+                ctx = self._fetch_market_context(ticker)
+                live_price = ctx.get("price", 0.0)
 
-            if signal in ("BUY", "SELL") and confidence >= conf_floor:
-                qty        = risk_profile.get("quantity", 1) or 1
-                sl_price   = risk_profile.get("sl_price", 0.0)
-                tp_price   = risk_profile.get("tp_price", 0.0)
-                risk_inr   = risk_profile.get("final_risk_inr",
-                             risk_profile.get("risk_per_trade_pct", 1.0) / 100.0
-                             * prefs.allocated_capital)
+                if live_price <= 0:
+                    logger.warning("[TradingLoop][%s] %s — price fetch failed, skipping",
+                                   cycle_id, ticker)
+                    continue
 
-                # Adjust SL/TP for direction
-                if signal == "BUY":
-                    sl_price = live_price - ctx.get("atr14", live_price * 0.015) * 2.0
-                    tp_price = live_price + ctx.get("atr14", live_price * 0.015) * 3.0
-                else:
-                    sl_price = live_price + ctx.get("atr14", live_price * 0.015) * 2.0
-                    tp_price = live_price - ctx.get("atr14", live_price * 0.015) * 3.0
+                # DreamerV3 decision
+                dreamer_dec = self._get_dreamer_decision_safe(prefs, risk)
 
-                exec_result = engine.place_entry(
-                    ticker         = prefs.ticker,
-                    direction      = signal,
-                    quantity       = qty,
-                    entry_price    = live_price,
-                    sl_price       = max(0.01, sl_price),
-                    tp_price       = max(0.01, tp_price),
-                    confidence     = confidence,
-                    dreamer_signal = dreamer_dec.get("direction", 0.0),
-                    risk_inr       = risk_inr,
-                    strategy_meta  = meta,
-                    risk_profile   = risk_profile,
+                # Meta decision
+                meta = self._compute_meta_decision(dreamer_dec, ctx, risk_profile)
+
+                _upd(
+                    current_decision    = {**dreamer_dec, "meta": meta, "ticker": ticker},
+                    dreamer_signal      = dreamer_dec.get("direction", 0.0),
+                    dreamer_confidence  = dreamer_dec.get("confidence", 0),
+                    dreamer_weights     = dreamer_dec.get("strategy_weights", {}),
+                    dreamer_wm_loss     = dreamer_dec.get("wm_loss", 0.0),
+                    last_decision_time  = datetime.now(timezone.utc).isoformat(),
+                    status              = "scanning",
                 )
 
-                if exec_result.get("success"):
-                    placed_order = exec_result.get("order", {})
-                    with _lock:
-                        _state["daily_trades"] += 1
-                        _state["open_trade"]    = placed_order
-                        _state["status"]        = "trading"
-                    # Phase 5: Telegram notification
-                    try:
-                        from agents.telegram_notifier import notify_trade_opened
-                        notify_trade_opened(placed_order)
-                    except Exception:
-                        pass
-                    logger.info(
-                        "[TradingLoop][%s] ORDER PLACED | %s %s × %d @ ₹%.2f | "
-                        "SL=₹%.2f TP=₹%.2f | conf=%.0f%%",
-                        cycle_id, signal, prefs.ticker, qty,
-                        live_price, sl_price, tp_price, confidence
-                    )
-                else:
-                    logger.info("[TradingLoop][%s] Entry skipped: %s",
-                                cycle_id, exec_result.get("error", "?"))
-            else:
-                _upd(status="scanning")
-                logger.info("[TradingLoop][%s] HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
-                            cycle_id, signal, confidence, conf_floor)
+                signal     = meta.get("signal", "HOLD")
+                confidence = meta.get("confidence", 0)
+                last_signal = signal
+                last_conf   = confidence
 
-            # ── Step 12: Update loop state ────────────────────────────────────
+                # Mode-aware confidence floor
+                try:
+                    from agents.execution_engine import MODE_LIVE as _MODE_LIVE
+                    conf_floor = META_CONFIDENCE_LIVE if engine._mode == _MODE_LIVE else META_CONFIDENCE_FLOOR
+                except Exception:
+                    conf_floor = META_CONFIDENCE_FLOOR
+
+                if signal in ("BUY", "SELL") and confidence >= conf_floor:
+                    qty       = risk_profile.get("quantity", 1) or 1
+                    atr14_val = ctx.get("atr14", live_price * 0.015)
+
+                    if signal == "BUY":
+                        sl_price = live_price - atr14_val * 2.0
+                        tp_price = live_price + atr14_val * 3.0
+                    else:
+                        sl_price = live_price + atr14_val * 2.0
+                        tp_price = live_price - atr14_val * 3.0
+
+                    risk_inr = risk_profile.get("final_risk_inr",
+                               risk_profile.get("risk_per_trade_pct", 1.0) / 100.0
+                               * prefs.allocated_capital)
+
+                    exec_result = engine.place_entry(
+                        ticker         = ticker,
+                        direction      = signal,
+                        quantity       = qty,
+                        entry_price    = live_price,
+                        sl_price       = max(0.01, sl_price),
+                        tp_price       = max(0.01, tp_price),
+                        confidence     = confidence,
+                        dreamer_signal = dreamer_dec.get("direction", 0.0),
+                        risk_inr       = risk_inr,
+                        strategy_meta  = meta,
+                        risk_profile   = risk_profile,
+                    )
+
+                    if exec_result.get("success"):
+                        placed_order = exec_result.get("order", {})
+                        with _lock:
+                            _state["daily_trades"] += 1
+                            _state["open_trade"]    = placed_order
+                            _state["status"]        = "trading"
+                        entries_this_cycle += 1
+                        try:
+                            from agents.telegram_notifier import notify_trade_opened
+                            notify_trade_opened(placed_order)
+                        except Exception:
+                            pass
+                        logger.info(
+                            "[TradingLoop][%s] ORDER PLACED | %s %s × %d @ ₹%.2f | "
+                            "SL=₹%.2f TP=₹%.2f | conf=%.0f%%",
+                            cycle_id, signal, ticker, qty,
+                            live_price, sl_price, tp_price, confidence
+                        )
+                    else:
+                        logger.info("[TradingLoop][%s] %s entry skipped: %s",
+                                    cycle_id, ticker, exec_result.get("error", "?"))
+                else:
+                    logger.info("[TradingLoop][%s] %s HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
+                                cycle_id, ticker, signal, confidence, conf_floor)
+
+            # If no new entries and no current trades → scanning status
+            final_open = engine.get_open_positions()
+            if final_open:
+                _upd(status="trading", open_trade=final_open[0])
+            elif entries_this_cycle == 0:
+                _upd(status="scanning")
+
+            # ── Step 9: Update loop state ─────────────────────────────────────
             with _lock:
                 dpnl   = _state.get("daily_pnl", 0.0)
                 target = _state.get("daily_profit_target") or prefs.daily_profit_target
                 _state["daily_target_pct"] = (dpnl / target * 100) if target > 0 else 0.0
 
             elapsed_ms = (time.perf_counter() - t_start) * 1000
-            self._update_state("last_cycle_status", f"ok:{signal}:{confidence:.0f}%")
+            self._update_state("last_cycle_status",
+                               f"ok:{last_signal}:{last_conf:.0f}% ({len(watchlist)} tickers, {len(final_open)} open)")
             self._update_state("last_cycle_time",
                                datetime.now(timezone.utc).isoformat())
             self._update_state("next_cycle_time",
@@ -504,14 +537,13 @@ class TradingLoop:
                                 + timedelta(minutes=self._interval_min)).isoformat())
             self._update_state("cycle_count", self._cycle_count)
 
-            logger.info("[TradingLoop][%s] Cycle done in %.0fms | %s %.0f%%",
-                        cycle_id, elapsed_ms, signal, confidence)
+            logger.info("[TradingLoop][%s] Cycle done in %.0fms | tickers=%d open=%d new=%d",
+                        cycle_id, elapsed_ms, len(watchlist), len(final_open), entries_this_cycle)
 
         except Exception as exc:
             logger.exception("[TradingLoop][%s] Cycle error: %s", cycle_id, exc)
             self._update_state("last_error", str(exc))
             self._update_state("last_cycle_status", f"error:{exc!s:.80}")
-            # Update orchestrator error state
             try:
                 from agents.dreamer_robo_orchestrator import _upd
                 _upd(error=str(exc))

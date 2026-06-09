@@ -127,12 +127,16 @@ class UserPreferences:
         ticker: str                = DEFAULT_TICKER,
         risk_tolerance: str        = "moderate",  # conservative / moderate / aggressive
         auto_mode: bool            = False,
+        watchlist: list            = None,
+        max_parallel_trades: int   = 3,
     ):
         self.daily_profit_target = max(0.0, daily_profit_target)
         self.allocated_capital   = max(1000.0, allocated_capital)
         self.ticker              = ticker
         self.risk_tolerance      = risk_tolerance
         self.auto_mode           = auto_mode
+        self.watchlist           = list(watchlist) if watchlist else []
+        self.max_parallel_trades = max(1, min(5, int(max_parallel_trades)))
 
     def to_dict(self) -> Dict:
         return {
@@ -141,6 +145,8 @@ class UserPreferences:
             "ticker":              self.ticker,
             "risk_tolerance":      self.risk_tolerance,
             "auto_mode":           self.auto_mode,
+            "watchlist":           self.watchlist,
+            "max_parallel_trades": self.max_parallel_trades,
         }
 
     @classmethod
@@ -151,6 +157,8 @@ class UserPreferences:
             ticker              = str(d.get("ticker", DEFAULT_TICKER)),
             risk_tolerance      = str(d.get("risk_tolerance", "moderate")),
             auto_mode           = bool(d.get("auto_mode", False)),
+            watchlist           = list(d.get("watchlist", [])),
+            max_parallel_trades = int(d.get("max_parallel_trades", 3)),
         )
 
 
@@ -327,6 +335,9 @@ _state: Dict = {
     "auto_mode":            False,
     "status":               "idle",       # idle | scanning | trading | paused | circuit_breaker
     "mode":                 "paper",      # paper | live | shadow
+    # Watchlist & parallel trading
+    "watchlist":            [],
+    "max_parallel_trades":  3,
     # Daily progress
     "daily_pnl":            0.0,
     "daily_trades":         0,
@@ -1230,6 +1241,8 @@ def update_user_preferences(
     allocated_capital: Optional[float]   = None,
     ticker: Optional[str]                = None,
     risk_tolerance: Optional[str]        = None,
+    watchlist: Optional[List]            = None,
+    max_parallel_trades: Optional[int]   = None,
 ) -> Dict:
     """
     Update user-defined settings and immediately recalculate risk profile.
@@ -1247,6 +1260,16 @@ def update_user_preferences(
         _prefs.ticker = str(ticker)
     if risk_tolerance is not None:
         _prefs.risk_tolerance = str(risk_tolerance)
+    if watchlist is not None:
+        _prefs.watchlist = [str(t).strip().upper() for t in watchlist]
+    if max_parallel_trades is not None:
+        _prefs.max_parallel_trades = max(1, min(5, int(max_parallel_trades)))
+        # Sync execution engine max positions
+        try:
+            from .execution_engine import engine
+            engine.set_max_positions(_prefs.max_parallel_trades)
+        except Exception:
+            pass
 
     # Phase 2: full RPM recalculation (fetches live market data for ATR)
     risk_profile = _recalculate_risk_full(trigger="user_update")
@@ -1256,6 +1279,8 @@ def update_user_preferences(
         allocated_capital   = _prefs.allocated_capital,
         ticker              = _prefs.ticker,
         risk_tolerance      = _prefs.risk_tolerance,
+        watchlist           = _prefs.watchlist,
+        max_parallel_trades = _prefs.max_parallel_trades,
         risk_profile        = risk_profile,
         current_capital     = _prefs.allocated_capital,
         peak_capital        = _prefs.allocated_capital,

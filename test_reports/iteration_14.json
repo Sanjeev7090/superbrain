@@ -1,0 +1,50 @@
+{
+  "summary": "Robot 3.0 Feature Testing — Multi-stock parallel trading (watchlist) and Kronos stale data fix. All 34 backend tests passed (100%). All frontend UI interactions verified successfully.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/robo/watchlist (multiple rapid calls)",
+        "issue": "Rate-limit (HTTP 429) triggered when making many rapid consecutive POST calls to /watchlist in quick succession. Not a functional bug — single user flow is unaffected.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_robot3_watchlist.py",
+    "/app/test_reports/pytest/test_robot3_watchlist.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TargetCapitalSettings.jsx: The watchlist section label says 'Max 10 tickers' (line 347 in JSX `<span className=...>Max 10 tickers</span>`) but the backend route normalizes to max 10 (req.watchlist[:10]). The UI note 'Max 10 tickers' is correct. However the review request says min 3 parallel trades — the UI shows 1x-5x buttons (correct per requirements) but there's no enforced minimum on the number of watchlist tickers (user can save 0 tickers in watchlist, robot will just use primary ticker). This is acceptable behavior as the primary ticker always gets auto-included.",
+    "dreamer_robo_orchestrator.py: UserPreferences.max_parallel_trades is clamped between 1 and 5 on both client update path and initialization — correct validation.",
+    "trading_loop.py _run_cycle(): max_parallel is read via getattr(_prefs, 'max_parallel_trades', 3) which is safe fallback. engine.set_max_positions(max_parallel) is called every cycle — correct behavior ensures settings take effect even if loop was running before settings were changed.",
+    "execution_engine.py set_max_positions(): Properly thread-safe with _lock and clamps to max(1, min(10, n)) — accepts up to 10 even though user can only set 1-5. This is fine as a safety ceiling."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_robot3_watchlist.py"
+  ],
+  "success_rate": {
+    "backend": "100% (34/34 tests passed)",
+    "frontend": "100% (all UI features verified)"
+  },
+  "test_credentials": "None required",
+  "seed_data_creation": "Backend tests set watchlist to ['RELIANCE.NS', 'TCS.NS', 'INFY.NS'] with max_parallel_trades=3 as cleanup step",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Robot 3.0 multi-stock parallel trading and Kronos stale data fix both fully verified. Backend: GET/POST /api/robo/watchlist work correctly, GET/POST /api/robo/settings include watchlist and max_parallel_trades in preferences, execution engine max positions is synced on every trading loop cycle. Frontend: TargetCapitalSettings modal has PARALLEL TRADING WATCHLIST section with 1x-5x parallel position buttons (data-testid: parallel-btn-{n}), watchlist chip add/remove (data-testid: watchlist-input, remove-wl-{ticker}), Save & Apply closes modal and calls both /robo/settings and /robo/watchlist. KronosForecastPanel clears forecast/stats/error when selectedStock.ticker changes (useEffect at line 72) — verified: switching from RELIANCE.NS to TCS.NS shows empty state with TCS.NS ticker and zero stale data from previous stock. No errors found.",
+  "api_responses_verified": {
+    "GET /api/robo/watchlist": "success=true, watchlist=[...], max_parallel_trades=3, primary_ticker present",
+    "POST /api/robo/watchlist {watchlist: [RELIANCE.NS, TCS.NS, INFY.NS], max_parallel_trades: 3}": "success=true, watchlist updated, message field present",
+    "POST /api/robo/watchlist {max_parallel_trades: 6}": "HTTP 422 (validation error — correctly rejected)",
+    "POST /api/robo/watchlist {max_parallel_trades: 4}": "success=true, max_parallel_trades=4",
+    "POST /api/robo/watchlist tickers without .NS": "Auto-appends .NS suffix correctly",
+    "GET /api/robo/settings": "preferences.watchlist and preferences.max_parallel_trades both present and reflect latest POST /watchlist values",
+    "POST /api/robo/settings {watchlist, max_parallel_trades}": "accepted, preferences updated in returned response"
+  }
+}
