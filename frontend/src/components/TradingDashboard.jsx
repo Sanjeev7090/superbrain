@@ -796,13 +796,15 @@ const TradingDashboard = () => {
               />
             )}
 
-            {activeTab === 'rlagent' && (
+            {/* RL AGENT — always mounted so training continues in background */}
+            <div style={{ display: activeTab === 'rlagent' ? 'block' : 'none' }}>
               <RLAgentPanel selectedStock={selectedStock} />
-            )}
+            </div>
 
-            {activeTab === 'robo' && (
+            {/* ROBO — always mounted so polling loop continues in background */}
+            <div style={{ display: activeTab === 'robo' ? 'block' : 'none' }}>
               <RoboDashboard selectedStock={selectedStock} onSelectStock={handleStockSelect} />
-            )}
+            </div>
 
             {activeTab === 'ensemble' && (
               <EnsembleCockpitPanel selectedStock={selectedStock} />

@@ -41,8 +41,9 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - Paper trading mode
 - Ensemble AI cockpit
 
-### Phase 5 — Linter Fix & Robo Entry Logic (Feb 2026) ← LATEST
-- Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py` (`trade_sig`, `atr_pct`, `daily_dd`)
+### Phase 5 — Linter Fix & Background Tab Persistence (Feb 2026) ← LATEST
+- Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py`
+- `RLAgentPanel` & `RoboDashboard` always mounted (CSS hide/show) — background training/polling continues on tab switch
 - Relaxed `META_CONFIDENCE_FLOOR` from 35→30, dynamic agent weights when DreamerV3 idle
 - 5X Leverage on BUY positions (paper + live)
 - Nifty/Sensex Options Chart fix (`/api/option/intraday`, `/api/option/sensex-intraday`)
