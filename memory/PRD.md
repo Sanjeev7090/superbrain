@@ -41,7 +41,15 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - Paper trading mode
 - Ensemble AI cockpit
 
-### Phase 5 — Linter Fix & Background Tab Persistence (Feb 2026) ← LATEST
+### Phase 6 — Multi-Stock Parallel Trading + Kronos Fix (Jun 2026) ← LATEST
+- Multi-stock watchlist management via `GET/POST /api/robo/watchlist`
+- Trading loop scans all watchlist tickers per cycle, up to `max_parallel_trades` (1–5) simultaneous positions
+- `execution_engine`: `set_max_positions()` + `has_open_position_for(ticker)` added
+- `dreamer_robo_orchestrator`: `watchlist` + `max_parallel_trades` in `UserPreferences`
+- Settings modal: "Parallel Trading Watchlist" section with 1×–5× buttons + add/remove UI
+- Kronos stale data bug fixed: clears old forecast on stock change
+
+### Phase 5 — Linter Fix & Background Tab Persistence (Feb 2026)
 - Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py`
 - `RLAgentPanel` & `RoboDashboard` always mounted (CSS hide/show) — background training/polling continues on tab switch
 - Relaxed `META_CONFIDENCE_FLOOR` from 35→30, dynamic agent weights when DreamerV3 idle
