@@ -30,8 +30,13 @@ DISCLAIMER: PAPER TRADING ONLY by default. No guaranteed returns.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import os
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from typing import Optional
 
@@ -956,3 +961,216 @@ async def update_watchlist(req: WatchlistRequest, bg: BackgroundTasks):
         "max_parallel_trades": req.max_parallel_trades,
         "message":             f"Watchlist updated: {len(clean)} stocks | Max parallel: {req.max_parallel_trades}",
     }
+
+
+# ─── 25. GET /watchlist/discover ─────────────────────────────────────────────
+
+# ── NSE F&O + Liquid universe for auto-discover ──────────────────────────────
+_DISCOVER_UNIVERSE = [
+    # Core NIFTY 50
+    {"ticker": "RELIANCE.NS",   "name": "Reliance Industries",  "sector": "Energy"},
+    {"ticker": "TCS.NS",        "name": "TCS",                  "sector": "IT"},
+    {"ticker": "HDFCBANK.NS",   "name": "HDFC Bank",            "sector": "Banking"},
+    {"ticker": "ICICIBANK.NS",  "name": "ICICI Bank",           "sector": "Banking"},
+    {"ticker": "INFY.NS",       "name": "Infosys",              "sector": "IT"},
+    {"ticker": "BHARTIARTL.NS", "name": "Bharti Airtel",        "sector": "Telecom"},
+    {"ticker": "BAJFINANCE.NS", "name": "Bajaj Finance",        "sector": "NBFC"},
+    {"ticker": "LT.NS",         "name": "L&T",                  "sector": "Infra"},
+    {"ticker": "AXISBANK.NS",   "name": "Axis Bank",            "sector": "Banking"},
+    {"ticker": "HCLTECH.NS",    "name": "HCL Technologies",     "sector": "IT"},
+    {"ticker": "MARUTI.NS",     "name": "Maruti Suzuki",        "sector": "Auto"},
+    {"ticker": "SBIN.NS",       "name": "SBI",                  "sector": "Banking"},
+    {"ticker": "TATAMOTORS.NS", "name": "Tata Motors",          "sector": "Auto"},
+    {"ticker": "SUNPHARMA.NS",  "name": "Sun Pharma",           "sector": "Pharma"},
+    {"ticker": "TITAN.NS",      "name": "Titan Company",        "sector": "Consumer"},
+    {"ticker": "WIPRO.NS",      "name": "Wipro",                "sector": "IT"},
+    {"ticker": "NTPC.NS",       "name": "NTPC",                 "sector": "Power"},
+    {"ticker": "TATASTEEL.NS",  "name": "Tata Steel",           "sector": "Metals"},
+    {"ticker": "ADANIENT.NS",   "name": "Adani Enterprises",    "sector": "Conglom."},
+    {"ticker": "JSWSTEEL.NS",   "name": "JSW Steel",            "sector": "Metals"},
+    {"ticker": "KOTAKBANK.NS",  "name": "Kotak Bank",           "sector": "Banking"},
+    {"ticker": "ITC.NS",        "name": "ITC",                  "sector": "FMCG"},
+    {"ticker": "DRREDDY.NS",    "name": "Dr. Reddy's",          "sector": "Pharma"},
+    {"ticker": "CIPLA.NS",      "name": "Cipla",                "sector": "Pharma"},
+    # High-beta Mid-cap
+    {"ticker": "PERSISTENT.NS", "name": "Persistent Systems",   "sector": "IT"},
+    {"ticker": "COFORGE.NS",    "name": "Coforge",              "sector": "IT"},
+    {"ticker": "LTIM.NS",       "name": "LTIMindtree",          "sector": "IT"},
+    {"ticker": "TRENT.NS",      "name": "Trent",                "sector": "Retail"},
+    {"ticker": "HAVELLS.NS",    "name": "Havells India",        "sector": "Electricals"},
+    {"ticker": "TATAELXSI.NS",  "name": "Tata Elxsi",          "sector": "IT"},
+    {"ticker": "KPITTECH.NS",   "name": "KPIT Technologies",    "sector": "IT"},
+    {"ticker": "DLF.NS",        "name": "DLF",                  "sector": "Realty"},
+    {"ticker": "TVSMOTOR.NS",   "name": "TVS Motor",            "sector": "Auto"},
+    {"ticker": "BAJAJ-AUTO.NS", "name": "Bajaj Auto",           "sector": "Auto"},
+    {"ticker": "M&M.NS",        "name": "M&M",                  "sector": "Auto"},
+    {"ticker": "RVNL.NS",       "name": "Rail Vikas Nigam",     "sector": "Infra"},
+    {"ticker": "ADANIPORTS.NS", "name": "Adani Ports",          "sector": "Ports"},
+    {"ticker": "TATAPOWER.NS",  "name": "Tata Power",           "sector": "Power"},
+    {"ticker": "BANKBARODA.NS", "name": "Bank of Baroda",       "sector": "Banking"},
+    {"ticker": "INDUSINDBK.NS", "name": "IndusInd Bank",        "sector": "Banking"},
+]
+
+_discover_cache: dict = {"ts": 0.0, "data": None}   # TTL=5 min
+_DISCOVER_SAMPLE = 28   # scan random 28 each call (fast)
+_DISCOVER_TOP    = 8    # return top 8
+
+
+def _momentum_score_stock(meta: dict) -> Optional[dict]:
+    """
+    Fetch 45d daily OHLCV for one ticker, compute momentum score.
+    Returns scored dict or None if data insufficient.
+    Score (0–100):
+      • 40 pts: Price momentum  — 5d chg vs 20d avg daily chg
+      • 30 pts: Volume spike    — last vol vs 10d avg vol
+      • 20 pts: Trend           — EMA9 > EMA21 > EMA50
+      • 10 pts: RSI sweet spot  — 45-70 = max 10 pts
+    """
+    import math
+    import yfinance as yf
+
+    def _safe(v):
+        try:
+            f = float(v)
+            return 0.0 if (math.isnan(f) or math.isinf(f)) else f
+        except Exception:
+            return 0.0
+
+    def _ema(closes, period):
+        if len(closes) < period:
+            return closes[-1] if closes else 0.0
+        k = 2.0 / (period + 1)
+        val = sum(closes[:period]) / period
+        for c in closes[period:]:
+            val = c * k + val * (1 - k)
+        return val
+
+    def _rsi(closes, period=14):
+        if len(closes) < period + 1:
+            return 50.0
+        gains = [max(closes[i] - closes[i-1], 0.0) for i in range(1, len(closes))]
+        losses = [max(closes[i-1] - closes[i], 0.0) for i in range(1, len(closes))]
+        avg_gain = sum(gains[-period:]) / period
+        avg_loss = sum(losses[-period:]) / period
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(100.0 - 100.0 / (1 + rs), 1)
+
+    try:
+        obj  = yf.Ticker(meta["ticker"])
+        hist = obj.history(period="45d", interval="1d")
+        if hist.empty or len(hist) < 20:
+            return None
+
+        closes  = [_safe(r["Close"])  for _, r in hist.iterrows()]
+        volumes = [_safe(r["Volume"]) for _, r in hist.iterrows()]
+        current = closes[-1]
+        if current <= 0:
+            return None
+
+        # ── Momentum (40 pts) ─────────────────────────────────────────────────
+        chg_5d  = (current - closes[-5]) / closes[-5] * 100 if len(closes) >= 5  else 0
+        chg_20d = (current - closes[-20]) / closes[-20] * 100 if len(closes) >= 20 else 0
+        # Bullish momentum: +2% in 5d, +5% in 20d
+        mom_score = min(40, max(0, chg_5d * 4 + chg_20d * 1.5))  # 0–40
+
+        # ── Volume spike (30 pts) ─────────────────────────────────────────────
+        avg_vol = sum(volumes[-11:-1]) / 10 if len(volumes) >= 11 else sum(volumes) / len(volumes)
+        vol_ratio = volumes[-1] / avg_vol if avg_vol > 0 else 1.0
+        vol_score = min(30, max(0, (vol_ratio - 1.0) * 20))       # >1.5× = 10 pts; >2.5× = 30 pts
+
+        # ── Trend (20 pts) ────────────────────────────────────────────────────
+        ema9  = _ema(closes, 9)
+        ema21 = _ema(closes, 21)
+        ema50 = _ema(closes, min(50, len(closes)))
+        trend_score = 0
+        if ema9  > ema21: trend_score += 10
+        if ema21 > ema50: trend_score += 10
+
+        # ── RSI sweet spot 45-70 (10 pts) ─────────────────────────────────────
+        rsi = _rsi(closes)
+        if 45 <= rsi <= 70:
+            rsi_score = 10 - abs(rsi - 57.5) / 57.5 * 10   # peak at RSI=57.5
+        else:
+            rsi_score = 0
+
+        # ── Direction ─────────────────────────────────────────────────────────
+        direction = "BUY" if chg_5d > 0 and ema9 > ema21 else ("SELL" if chg_5d < -1.0 else "HOLD")
+
+        total_score = round(mom_score + vol_score + trend_score + rsi_score, 1)
+
+        return {
+            "ticker":      meta["ticker"],
+            "name":        meta["name"],
+            "sector":      meta.get("sector", ""),
+            "price":       round(current, 2),
+            "chg_5d":      round(chg_5d, 2),
+            "chg_20d":     round(chg_20d, 2),
+            "vol_ratio":   round(vol_ratio, 2),
+            "rsi":         rsi,
+            "ema9":        round(ema9, 2),
+            "ema21":       round(ema21, 2),
+            "direction":   direction,
+            "score":       total_score,
+            "score_breakdown": {
+                "momentum": round(mom_score, 1),
+                "volume":   round(vol_score, 1),
+                "trend":    round(trend_score, 1),
+                "rsi":      round(rsi_score, 1),
+            },
+        }
+    except Exception:
+        return None
+
+
+@robo_router.get("/watchlist/discover")
+async def auto_discover_watchlist(refresh: bool = False):
+    """
+    Auto-Discover top momentum stocks for the watchlist.
+
+    Scores each stock (0–100) on:
+      • Price momentum   (5d + 20d change)
+      • Volume spike     (vs 10d avg)
+      • Trend strength   (EMA9 > EMA21 > EMA50)
+      • RSI sweet zone   (45–70)
+
+    Cached for 5 minutes. Use ?refresh=true to force re-scan.
+    Returns top 8 high-momentum BUY/SELL candidates.
+    """
+    global _discover_cache
+
+    now = time.time()
+    if not refresh and _discover_cache["data"] and (now - _discover_cache["ts"]) < 300:
+        return {"success": True, "from_cache": True, **_discover_cache["data"]}
+
+    # Pick random sample so every call discovers something new on refresh
+    sample = random.sample(_DISCOVER_UNIVERSE, min(_DISCOVER_SAMPLE, len(_DISCOVER_UNIVERSE)))
+
+    results = []
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        futures = {ex.submit(_momentum_score_stock, m): m for m in sample}
+        for fut in as_completed(futures):
+            try:
+                res = fut.result(timeout=15)
+                if res:
+                    results.append(res)
+            except Exception:
+                pass
+
+    # Sort by score descending; prefer BUY over SELL over HOLD
+    dir_order = {"BUY": 0, "SELL": 1, "HOLD": 2}
+    results.sort(key=lambda x: (-x["score"], dir_order.get(x["direction"], 2)))
+
+    top = results[:_DISCOVER_TOP]
+
+    payload = {
+        "candidates":   top,
+        "total_scanned": len(results),
+        "scan_pool":     len(sample),
+        "cached_at":    now,
+    }
+    _discover_cache = {"ts": now, "data": payload}
+
+    return {"success": True, "from_cache": False, **payload}

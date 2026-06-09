@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { X, TrendingUp, Wallet, Shield, AlertTriangle, Search, Plus, Trash2, Layers } from 'lucide-react';
+import { X, TrendingUp, Wallet, Shield, AlertTriangle, Search, Plus, Trash2, Layers, Zap, RefreshCw, TrendingDown, Minus } from 'lucide-react';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
@@ -61,6 +61,12 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
   const [wlResults,         setWlResults]          = useState([]);
   const [wlLoading,         setWlLoading]          = useState(false);
   const wlDebounceRef = useRef(null);
+
+  // Auto-Discover state
+  const [discovering,   setDiscovering]   = useState(false);
+  const [discovered,    setDiscovered]    = useState([]);
+  const [discoverErr,   setDiscoverErr]   = useState(null);
+  const [showDiscover,  setShowDiscover]  = useState(false);
 
   // Auto-preview on input change (debounced 600ms)
   useEffect(() => {
@@ -140,6 +146,31 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
   };
 
   const removeFromWatchlist = (t) => setWatchlist(prev => prev.filter(x => x !== t));
+
+  const runAutoDiscover = async (forceRefresh = false) => {
+    setDiscovering(true);
+    setDiscoverErr(null);
+    setShowDiscover(true);
+    try {
+      const res = await axios.get(`${API}/robo/watchlist/discover${forceRefresh ? '?refresh=true' : ''}`);
+      setDiscovered(res.data.candidates || []);
+    } catch (e) {
+      setDiscoverErr('Scan failed — try again');
+      setDiscovered([]);
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const addTopN = (n) => {
+    const toAdd = discovered.filter(c => c.direction === 'BUY').slice(0, n);
+    if (toAdd.length === 0) {
+      // fallback: just take top n by score
+      discovered.slice(0, n).forEach(c => addToWatchlist(c.ticker));
+    } else {
+      toAdd.forEach(c => addToWatchlist(c.ticker));
+    }
+  };
 
   const handleSelectTicker = (stock) => {
     setTickerQuery(stock.ticker);
@@ -344,7 +375,22 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
                 Parallel Trading Watchlist
               </p>
-              <span className="ml-auto text-[9px] text-zinc-600">Max 10 tickers</span>
+              <div className="ml-auto flex items-center gap-2">
+                <span className="text-[9px] text-zinc-600">Max 10 tickers</span>
+                <button
+                  onClick={() => runAutoDiscover(false)}
+                  disabled={discovering}
+                  data-testid="auto-discover-btn"
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold border transition-all ${
+                    discovering
+                      ? 'bg-violet-900/30 border-violet-700/40 text-violet-400 cursor-wait'
+                      : 'bg-violet-600/15 border-violet-600/40 text-violet-300 hover:bg-violet-600/25 hover:border-violet-500/60'
+                  }`}
+                >
+                  <Zap size={8} className={discovering ? 'animate-pulse' : ''} />
+                  {discovering ? 'Scanning...' : 'Auto-Discover'}
+                </button>
+              </div>
             </div>
             <div className="p-4 space-y-3">
               {/* Max parallel trades picker */}
@@ -391,6 +437,138 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
                       </button>
                     </span>
                   ))}
+                </div>
+              )}
+
+              {/* ── Auto-Discover Results Panel ────────────────────────── */}
+              {showDiscover && (
+                <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/60">
+                  <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/80">
+                    <div className="flex items-center gap-1.5">
+                      <Zap size={9} className="text-violet-400" />
+                      <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">
+                        {discovering ? 'Scanning momentum...' : `${discovered.length} candidates found`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {!discovering && discovered.length > 0 && (
+                        <>
+                          <button
+                            onClick={() => addTopN(maxParallel)}
+                            className="text-[8px] font-bold text-emerald-400 border border-emerald-700/40 bg-emerald-900/20 px-2 py-0.5 rounded-md hover:bg-emerald-800/30 transition-colors"
+                            data-testid="add-top-n-btn"
+                          >
+                            + Add Top {maxParallel}
+                          </button>
+                          <button
+                            onClick={() => runAutoDiscover(true)}
+                            className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                            title="Rescan"
+                            data-testid="rescan-btn"
+                          >
+                            <RefreshCw size={9} />
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setShowDiscover(false)}
+                        className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                      >
+                        <X size={9} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Loading skeleton */}
+                  {discovering && (
+                    <div className="p-2 space-y-1.5">
+                      {[0,1,2,3,4].map(i => (
+                        <div key={i} className="h-9 bg-zinc-800/50 rounded-lg animate-pulse" style={{animationDelay:`${i*100}ms`}} />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {discoverErr && !discovering && (
+                    <div className="p-3 text-center text-[10px] text-red-400">{discoverErr}</div>
+                  )}
+
+                  {/* Results list */}
+                  {!discovering && discovered.length > 0 && (
+                    <div className="divide-y divide-zinc-800/60 max-h-52 overflow-y-auto">
+                      {discovered.map((c, i) => {
+                        const isBuy  = c.direction === 'BUY';
+                        const isSell = c.direction === 'SELL';
+                        const inWl   = watchlist.includes(c.ticker);
+                        return (
+                          <div
+                            key={c.ticker}
+                            className="flex items-center gap-2 px-3 py-2 hover:bg-zinc-900/40 transition-colors"
+                            style={{ animationDelay: `${i * 60}ms` }}
+                            data-testid={`discover-card-${c.ticker}`}
+                          >
+                            {/* Rank */}
+                            <span className="text-[8px] font-black text-zinc-700 w-3 text-center">{i+1}</span>
+
+                            {/* Direction badge */}
+                            <span className={`text-[7px] font-black px-1 py-0.5 rounded min-w-[28px] text-center ${
+                              isBuy  ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-700/30' :
+                              isSell ? 'bg-red-900/40 text-red-400 border border-red-700/30' :
+                                       'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                            }`}>
+                              {c.direction}
+                            </span>
+
+                            {/* Name + sector */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1">
+                                <span className="text-[10px] font-mono font-bold text-white truncate">{c.ticker.replace('.NS','')}</span>
+                                <span className="text-[7px] text-zinc-600 truncate">{c.sector}</span>
+                              </div>
+                              {/* Score bar */}
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <div className="h-1 flex-1 bg-zinc-800 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                      isBuy ? 'bg-emerald-500' : isSell ? 'bg-red-500' : 'bg-zinc-500'
+                                    }`}
+                                    style={{ width: `${Math.min(100, c.score)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[7px] text-zinc-500 whitespace-nowrap">{c.score.toFixed(0)}pt</span>
+                              </div>
+                            </div>
+
+                            {/* Stats */}
+                            <div className="text-right flex-shrink-0">
+                              <div className={`text-[9px] font-bold ${c.chg_5d >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {c.chg_5d >= 0 ? '+' : ''}{c.chg_5d?.toFixed(1)}%
+                              </div>
+                              <div className="text-[7px] text-zinc-600">
+                                {c.vol_ratio?.toFixed(1)}× vol
+                              </div>
+                            </div>
+
+                            {/* Add button */}
+                            <button
+                              onClick={() => addToWatchlist(c.ticker)}
+                              disabled={inWl}
+                              data-testid={`discover-add-${c.ticker}`}
+                              className={`flex-shrink-0 text-[8px] font-bold px-1.5 py-0.5 rounded-md border transition-all ${
+                                inWl
+                                  ? 'text-zinc-600 border-zinc-700 cursor-default'
+                                  : isBuy
+                                  ? 'text-emerald-400 border-emerald-700/40 hover:bg-emerald-900/20'
+                                  : 'text-violet-400 border-violet-700/40 hover:bg-violet-900/20'
+                              }`}
+                            >
+                              {inWl ? '✓' : '+'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
