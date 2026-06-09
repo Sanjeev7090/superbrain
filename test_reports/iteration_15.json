@@ -1,0 +1,35 @@
+{
+  "summary": "Validated vertical right-sidebar tabs (Desktop/iPad/Mobile) + Auto-Discover momentum scanner + Robo core/watchlist endpoints. All 9 backend tests passed (100%). All 9 vertical tabs render & switch correctly across 3 viewports with active green-border indicator. Auto-Discover button in Robo-Trader Settings modal successfully returns 8 candidates with BUY direction, score and price fields.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_robo_discover_vertical_tabs.py",
+    "/app/test_reports/pytest/test_robo_discover_vertical_tabs.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TradingDashboard.jsx (~952 lines): file is now large — consider extracting the right-sidebar tab nav + content switcher into a separate <RightSidebarTabs/> component for maintainability.",
+    "robo_router.py auto_discover_watchlist: cache TTL hardcoded to 300s and _DISCOVER_TOP/_DISCOVER_SAMPLE are module constants. Acceptable, but worth moving to env vars for ops tuning.",
+    "auto_discover uses ThreadPoolExecutor with 8 workers inside an async route; the route does not await loop.run_in_executor and instead blocks on as_completed() — this blocks the event loop for up to ~15s per future. Consider wrapping in asyncio.to_thread() or using run_in_executor to keep event loop responsive.",
+    "TargetCapitalSettings.jsx auto-discover error handling shows only a generic 'Scan failed — try again' message; surface the underlying error for easier debugging.",
+    "Right sidebar nav text uses [7px] font on mobile (52px width) — readable but very tight. Acceptable for the compact icon-strip pattern."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_robo_discover_vertical_tabs.py",
+    "/app/test_reports/iteration_15.json"
+  ],
+  "success_rate": {"backend": "100% (9/9)", "frontend": "100% (vertical tabs + auto-discover validated across 3 viewports)"},
+  "test_credentials": "No auth needed",
+  "seed_data_creation": "POST /api/robo/watchlist with [RELIANCE.NS, TCS.NS] and max_parallel_trades=3 created for persistence test",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Vertical tabs (data-testid='right-tabs-nav') verified on Desktop 1920x800 (nav box: 68x663px, all 9 tabs visible vertically), iPad 1024x768 (68x631px), Mobile 390x844 after clicking [data-testid='mobile-panel-right'] (52x324px). All 9 tab IDs present: tab-scanner, tab-strategies, tab-paper, tab-rlagent, tab-robo, tab-ensemble, tab-picker, tab-pece, tab-quant. Tab switching works for all 9 with active green-border indicator. Auto-Discover button is INSIDE the Robo-Trader Settings modal (open via Robo tab > Settings button > scroll to Parallel Trading Watchlist section). Returns 8 momentum candidates with BUY/SELL/HOLD direction. Backend: GET /api/robo/watchlist/discover validated, refresh=true bypasses 5-min cache. DEMON endpoint bug at server.py:5325 NOT tested (per instructions).",
+  "rca of the issue": "N/A — no issues found"
+}

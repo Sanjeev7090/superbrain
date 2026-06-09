@@ -481,15 +481,15 @@ const TradingDashboard = () => {
   const isOption = selectedStock?.type === 'OPTION';
 
   const rightTabs = [
-    { id: 'scanner',    label: 'SCANNER'     },
-    { id: 'strategies', label: 'STRATEGIES'  },
-    { id: 'paper',      label: 'PAPER'       },
-    { id: 'rlagent',    label: 'RL AGENT'    },
-    { id: 'robo',       label: '🤖 ROBO'     },
-    { id: 'ensemble',   label: 'AI ASSEMBLE' },
-    { id: 'picker',     label: 'PICKER'      },
-    { id: 'pece',       label: 'PE-CE OI'    },
-    { id: 'quant',      label: '⚡ QUANT'    },
+    { id: 'scanner',    label: 'SCANNER',     shortLabel: 'SCAN'    },
+    { id: 'strategies', label: 'STRATEGIES',  shortLabel: 'STRAT'   },
+    { id: 'paper',      label: 'PAPER',       shortLabel: 'PAPER'   },
+    { id: 'rlagent',    label: 'RL AGENT',    shortLabel: 'RL'      },
+    { id: 'robo',       label: '🤖 ROBO',     shortLabel: '🤖ROBO'  },
+    { id: 'ensemble',   label: 'AI ASSEMBLE', shortLabel: 'AI ASM'  },
+    { id: 'picker',     label: 'PICKER',      shortLabel: 'PICK'    },
+    { id: 'pece',       label: 'PE-CE OI',    shortLabel: 'PE-CE'   },
+    { id: 'quant',      label: '⚡ QUANT',    shortLabel: '⚡QNT'   },
   ];
 
   const leftTabs = [
@@ -762,27 +762,27 @@ const TradingDashboard = () => {
 
         {/* Right Sidebar */}
         <aside className={`lg:col-span-3 border-l border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'right' ? 'hidden lg:flex' : 'flex'}`} data-testid="right-sidebar">
-          {/* Tabs — horizontally scrollable on mobile */}
-          <div className="flex border-b border-slate-200 dark:border-white/10 shrink-0 overflow-x-auto scrollbar-none bg-white dark:bg-[#0A0A0A]">
-            {rightTabs.map(tab => tab.isDivider ? (
-              <div key={tab.id} className="flex items-center shrink-0 px-2 border-l border-slate-200 dark:border-white/10 select-none">
-                <span className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-zinc-600 whitespace-nowrap">{tab.label}</span>
-              </div>
-            ) : (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                className={`flex-shrink-0 flex-1 min-w-[64px] py-2.5 px-2 text-[9px] font-bold uppercase tracking-[0.1em] transition-colors whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? 'text-[#00E676] border-b-2 border-[#00E676] bg-[#00E676]/10 dark:bg-white/5'
-                    : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300'
-                }`}
-                data-testid={`tab-${tab.id}`}>
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <div className="flex flex-1 min-h-0">
+            {/* Vertical Tabs — compact left strip */}
+            <nav className="shrink-0 w-[52px] md:w-[60px] lg:w-[68px] flex flex-col border-r border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0D0D0D] overflow-y-auto scrollbar-none" data-testid="right-tabs-nav">
+              {rightTabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`relative py-2.5 md:py-3 px-1 text-[7px] md:text-[8px] lg:text-[8.5px] font-bold uppercase tracking-[0.04em] transition-all whitespace-nowrap text-center leading-tight ${
+                    activeTab === tab.id
+                      ? 'text-[#00E676] bg-[#00E676]/10 dark:bg-[#00E676]/5'
+                      : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/5'
+                  }`}
+                  data-testid={`tab-${tab.id}`}>
+                  {activeTab === tab.id && (
+                    <span className="absolute left-0 top-1 bottom-1 w-[2px] bg-[#00E676] rounded-r-full" />
+                  )}
+                  {tab.shortLabel || tab.label}
+                </button>
+              ))}
+            </nav>
 
-          {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto">
+            {/* Tab Content */}
+            <div className="flex-1 overflow-y-auto min-w-0">
             {activeTab === 'scanner' && (
               <AutoScanner
                 selectedStock={selectedStock}
@@ -868,6 +868,7 @@ const TradingDashboard = () => {
                 <QuantPanel selectedStock={selectedStock} />
               </div>
             )}
+            </div>
           </div>
         </aside>
       </div>
