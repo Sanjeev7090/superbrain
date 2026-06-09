@@ -1818,6 +1818,170 @@ async def get_option_intraday(
     return result
 
 
+@api_router.get("/option/sensex-intraday")
+async def get_sensex_option_intraday(
+    strike: float = Query(..., description="SENSEX strike price (e.g., 73500)"),
+    option_type: str = Query(..., pattern="^(CE|PE|ce|pe)$", description="CE or PE"),
+    expiry: str = Query(..., description="Expiry in 'DD-Mon-YYYY' format"),
+    interval_min: int = Query(5, ge=1, le=15, description="Bar size in minutes"),
+):
+    """Intraday OHLC candles for a SENSEX option (BSE).
+
+    BSE does not expose a public chart-databyindex endpoint like NSE, so we
+    synthesize the option chart from the live SENSEX spot (^BSESN) intraday
+    bars using Black-Scholes with India VIX as IV. This mirrors the same
+    derivation model already used for the SENSEX option chain.
+    """
+    import math
+
+    opt = option_type.upper()
+    if opt not in ("CE", "PE"):
+        raise HTTPException(400, "option_type must be CE or PE")
+
+    # Parse expiry → DD-Mon-YYYY
+    try:
+        exp_obj = datetime.strptime(expiry, "%d-%b-%Y")
+    except ValueError:
+        try:
+            exp_obj = datetime.strptime(expiry, "%d-%m-%Y")
+        except ValueError:
+            raise HTTPException(400, f"Invalid expiry format: {expiry}. Expected 'DD-Mon-YYYY'.")
+    expiry_display = exp_obj.strftime("%d-%b-%Y")
+
+    cache_key = f"sensex_opt_intra_{int(strike)}_{opt}_{expiry_display}_{interval_min}"
+    if cache_key in cache_storage:
+        cached_data, cached_time = cache_storage[cache_key]
+        if (datetime.now() - cached_time).seconds < 30:
+            return cached_data
+
+    # ── Fetch ^BSESN intraday bars via yfinance ──────────────────
+    interval_map = {1: "1m", 2: "2m", 5: "5m", 15: "15m"}
+    yf_interval = interval_map.get(interval_min, "5m")
+    period = "7d" if yf_interval == "1m" else "60d"
+
+    try:
+        spot_ticker = yf.Ticker("^BSESN")
+        hist = spot_ticker.history(period=period, interval=yf_interval)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch SENSEX spot bars: {e}")
+
+    if hist is None or hist.empty:
+        raise HTTPException(404, "No SENSEX spot intraday data available")
+
+    # Last trading session only (most recent date)
+    try:
+        hist = hist.tail(120)
+    except Exception:
+        pass
+
+    # ── Get live India VIX (cached) ──────────────────────────────
+    try:
+        sigma = _fetch_live_india_vix()
+    except Exception:
+        sigma = 0.15
+
+    # Black-Scholes pricing helpers (mirror existing model)
+    r = 0.065  # India risk-free ~6.5%
+    today_d = datetime.now().date()
+    T_at_expiry = max((exp_obj.date() - today_d).days / 365.0, 1 / 365)
+
+    # IV skew: puts get slightly higher IV (negative skew typical for index)
+    K = float(strike)
+
+    def _norm_cdf(x):
+        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+    def bs_price(S, K, T, r, sig, is_call):
+        if T <= 0 or S <= 0 or K <= 0 or sig <= 0:
+            return 0.0
+        try:
+            d1 = (math.log(S / K) + (r + 0.5 * sig ** 2) * T) / (sig * math.sqrt(T))
+            d2 = d1 - sig * math.sqrt(T)
+            if is_call:
+                return max(0.0, S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2))
+            return max(0.0, K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1))
+        except Exception:
+            return 0.0
+
+    is_call = (opt == "CE")
+
+    bars = []
+    for ts, row in hist.iterrows():
+        try:
+            o_spot = float(row["Open"])
+            h_spot = float(row["High"])
+            l_spot = float(row["Low"])
+            c_spot = float(row["Close"])
+        except Exception:
+            continue
+        if not all([o_spot, h_spot, l_spot, c_spot]):
+            continue
+
+        # Time to expiry from this bar's timestamp
+        try:
+            bar_dt = ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts
+            bar_date = bar_dt.date() if hasattr(bar_dt, "date") else today_d
+        except Exception:
+            bar_date = today_d
+        T_bar = max((exp_obj.date() - bar_date).days / 365.0, 1 / 365)
+
+        # Per-bar IV with mild skew
+        if is_call:
+            iv = sigma * (1 + 0.05 * max(0, (K - c_spot) / max(c_spot, 1) * 10))
+        else:
+            iv = sigma * (1 + 0.10 * max(0, (c_spot - K) / max(c_spot, 1) * 10))
+
+        # Map spot O/H/L/C → option O/H/L/C.
+        # Call option moves WITH spot (high spot → high option price).
+        # Put option moves AGAINST spot (low spot → high put price).
+        if is_call:
+            o = bs_price(o_spot, K, T_bar, r, iv, True)
+            c = bs_price(c_spot, K, T_bar, r, iv, True)
+            hi = bs_price(h_spot, K, T_bar, r, iv, True)
+            lo = bs_price(l_spot, K, T_bar, r, iv, True)
+        else:
+            o = bs_price(o_spot, K, T_bar, r, iv, False)
+            c = bs_price(c_spot, K, T_bar, r, iv, False)
+            # For put: high option price occurs at low spot, low option price at high spot
+            hi = bs_price(l_spot, K, T_bar, r, iv, False)
+            lo = bs_price(h_spot, K, T_bar, r, iv, False)
+
+        try:
+            ts_sec = int(bar_dt.timestamp())
+        except Exception:
+            continue
+
+        bars.append({
+            "timestamp": ts_sec,
+            "open":   round(o,  2),
+            "high":   round(hi, 2),
+            "low":    round(lo, 2),
+            "close":  round(c,  2),
+            "volume": 0,
+        })
+
+    if not bars:
+        raise HTTPException(404, "Could not build SENSEX option bars from spot data")
+
+    label = "Call" if is_call else "Put"
+    result = {
+        "ticker": f"SENSEX{int(strike)}{opt}_{expiry_display}",
+        "instrument": f"SENSEX {int(strike)} {label}",
+        "underlying": "SENSEX",
+        "strike": float(strike),
+        "type": opt,
+        "expiry": expiry_display,
+        "interval_min": interval_min,
+        "bars": bars,
+        "india_vix": round(sigma * 100, 2),
+        "is_live_derived": True,
+        "note": f"BS-synthesized · SENSEX spot ^BSESN · India VIX {sigma*100:.1f}%",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    cache_storage[cache_key] = (result, datetime.now())
+    return result
+
+
 @api_router.post("/gann/fan", response_model=GannFanResponse)
 async def calculate_gann_fan(request: GannFanRequest):
     """Calculate Gann Fan angles from a pivot point"""
