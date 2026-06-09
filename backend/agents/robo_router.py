@@ -31,10 +31,12 @@ DISCLAIMER: PAPER TRADING ONLY by default. No guaranteed returns.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Query
+from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 
 from . import dreamer_robo_orchestrator as orch
@@ -55,6 +57,13 @@ DISCLAIMER = (
     "⚠️  PAPER TRADING / RESEARCH ONLY. No guaranteed returns. "
     "Past performance ≠ future results. Consult a SEBI-registered advisor."
 )
+
+
+def _get_robo_db():
+    """Get Motor DB handle for robo_orders — fresh client each time to avoid loop issues."""
+    url  = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+    name = os.environ.get("DB_NAME", "trading_db")
+    return AsyncIOMotorClient(url)[name]
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -523,20 +532,31 @@ async def set_mode(req: ModeRequest):
 @robo_router.get("/positions")
 async def get_open_positions():
     """
-    Currently open positions across all modes (paper / live / shadow).
-    Includes pending live orders awaiting confirmation delay.
+    Currently open positions — merges in-memory + DB (OPEN status) for persistence across restarts.
     """
     try:
         from .execution_engine import engine
         stats = engine.get_daily_stats()
+        mem_positions = stats["open_positions_list"]
+        mem_ids = {p.get("order_id") for p in mem_positions}
+
+        # Load DB open positions not already in memory (from previous session)
+        try:
+            db = _get_robo_db()
+            cursor = db["robo_orders"].find({"status": "OPEN"}, {"_id": 0}).sort("entry_time", -1).limit(50)
+            db_open = [doc async for doc in cursor]
+            extra_open = [p for p in db_open if p.get("order_id") not in mem_ids]
+        except Exception:
+            extra_open = []
+
         return {
-            "success":             True,
-            "mode":                engine.mode,
-            "open_positions":      stats["open_positions_list"],
-            "pending_positions":   stats["pending_list"],
-            "shadow_signals":      stats["shadow_list"],
-            "open_count":          stats["open_positions"],
-            "pending_count":       stats["pending_positions"],
+            "success":           True,
+            "mode":              engine.mode,
+            "open_positions":    mem_positions + extra_open,
+            "pending_positions": stats["pending_list"],
+            "shadow_signals":    stats["shadow_list"],
+            "open_count":        stats["open_positions"] + len(extra_open),
+            "pending_count":     stats["pending_positions"],
         }
     except Exception as exc:
         return {"success": False, "error": str(exc), "open_positions": []}
@@ -546,28 +566,40 @@ async def get_open_positions():
 @robo_router.get("/orders")
 async def get_order_history(limit: int = Query(50, ge=1, le=200)):
     """
-    Full order history (closed orders) for today's session.
-    Includes P&L, brokerage, exit reason, DreamerV3 signal, risk profile snapshot.
+    Full order history (all orders) — from MongoDB for persistence across restarts.
+    Merges DB records with any in-memory orders not yet persisted.
     """
     try:
         from .execution_engine import engine
-        history = engine.get_order_history(limit=limit)
+        # Primary: DB history via fresh Motor client
+        try:
+            db = _get_robo_db()
+            cursor = db["robo_orders"].find({}, {"_id": 0}).sort("entry_time", -1).limit(limit)
+            db_orders = [doc async for doc in cursor]
+        except Exception as db_exc:
+            logger.warning("[robo/orders] DB fetch failed: %s", db_exc)
+            db_orders = []
+
+        # Secondary: merge in-memory orders not yet in DB
+        db_ids = {o.get("order_id") for o in db_orders}
+        mem_orders = engine.get_open_positions() + engine.get_order_history(limit=limit)
+        extra = [o for o in mem_orders if o.get("order_id") not in db_ids]
+
+        history = (extra + db_orders)[:limit]
         stats   = engine.get_daily_stats()
-        total_pnl  = sum((o.get("pnl") or 0) for o in history)
-        total_net  = sum((o.get("net_pnl") or 0) for o in history)
-        wins       = sum(1 for o in history if (o.get("pnl") or 0) > 0)
-        losses     = len(history) - wins
+        wins    = sum(1 for o in history if (o.get("pnl") or 0) > 0)
+        losses  = sum(1 for o in history if (o.get("pnl") or 0) < 0)
         return {
-            "success":        True,
-            "mode":           engine.mode,
-            "orders":         history,
-            "count":          len(history),
-            "daily_pnl":      round(stats["daily_pnl"], 2),
-            "daily_net_pnl":  round(stats["daily_net_pnl"], 2),
+            "success":         True,
+            "mode":            engine.mode,
+            "orders":          history,
+            "count":           len(history),
+            "daily_pnl":       round(stats["daily_pnl"], 2),
+            "daily_net_pnl":   round(stats["daily_net_pnl"], 2),
             "daily_brokerage": round(stats["daily_brokerage"], 2),
-            "wins":           wins,
-            "losses":         losses,
-            "win_rate":       round(wins / max(len(history), 1) * 100, 1),
+            "wins":            wins,
+            "losses":          losses,
+            "win_rate":        round(wins / max(len(history), 1) * 100, 1),
         }
     except Exception as exc:
         return {"success": False, "error": str(exc), "orders": []}

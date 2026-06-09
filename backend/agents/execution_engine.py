@@ -29,6 +29,7 @@ Date   : June 2026
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -319,6 +320,8 @@ class ExecutionEngine:
                 "[ExecEngine][PAPER] %s %s × %d @ ₹%.2f | SL=₹%.2f TP=₹%.2f | conf=%.0f%%",
                 direction, ticker, quantity, entry_price, sl_price, tp_price, confidence
             )
+            # Persist open order to DB
+            self._schedule_db_upsert(order)
 
         elif mode == MODE_LIVE:
             # Start confirmation delay in background
@@ -523,6 +526,9 @@ class ExecutionEngine:
             pnl, net_pnl, reason
         )
 
+        # Persist closed order to DB (upsert — updates the existing OPEN record)
+        self._schedule_db_upsert(order)
+
         # Live mode: cancel SL order + place exit order
         if order.mode == MODE_LIVE:
             threading.Thread(
@@ -692,10 +698,47 @@ class ExecutionEngine:
         except Exception as exc:
             logger.debug("[ExecEngine] DB save failed: %s", exc)
 
+    async def upsert_order_to_db(self, order: Order) -> None:
+        """Upsert an order (open or closed) to MongoDB by order_id."""
+        try:
+            db  = self._get_db()
+            doc = order.to_dict()
+            doc.pop("_id", None)
+            await db["robo_orders"].update_one(
+                {"order_id": order.order_id},
+                {"$set": doc},
+                upsert=True,
+            )
+        except Exception as exc:
+            logger.warning("[ExecEngine] DB upsert failed: %s", exc)
+
+    def _schedule_db_upsert(self, order: Order) -> None:
+        """Fire-and-forget background thread to upsert order to MongoDB (sync pymongo)."""
+        import copy
+        order_copy = copy.copy(order)
+        def _run():
+            try:
+                import pymongo as _pymongo
+                url  = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+                name = os.environ.get("DB_NAME", "trading_db")
+                client = _pymongo.MongoClient(url, serverSelectionTimeoutMS=5000)
+                db = client[name]
+                doc = order_copy.to_dict()
+                doc.pop("_id", None)
+                db["robo_orders"].update_one(
+                    {"order_id": order_copy.order_id},
+                    {"$set": doc},
+                    upsert=True,
+                )
+                client.close()
+            except Exception as exc:
+                logger.warning("[ExecEngine] DB sync upsert failed: %s", exc)
+        threading.Thread(target=_run, daemon=True, name="exec-db-upsert").start()
+
     async def get_db_history(self, limit: int = 50) -> List[Dict]:
         try:
             db  = self._get_db()
-            cur = db["robo_orders"].find({}, {"_id": 0}).sort("exit_time", -1).limit(limit)
+            cur = db["robo_orders"].find({}, {"_id": 0}).sort("entry_time", -1).limit(limit)
             return [doc async for doc in cur]
         except Exception as exc:
             logger.warning("[ExecEngine] DB history fetch failed: %s", exc)
