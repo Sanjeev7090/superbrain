@@ -110,6 +110,14 @@ REWARD_HEAT_PENALTY     = 5.0    # penalty when portfolio heat too high
 # ── Live-mode safety multiplier ───────────────────────────────────────────────
 LIVE_MODE_SAFETY_MULT   = 0.70   # all sizes × 0.70 in live mode
 
+# ── Robot 3.O leverage (MIS intraday margin) ─────────────────────────────────
+# When BUYING any stock, quantity is multiplied by this factor to utilise
+# broker intraday margin (e.g. Groww MIS gives ~5x leverage on most large-caps).
+# Risk per trade scales proportionally — SL/TP distances stay the same; only
+# share-count and total position value increase. SELL/short trades are NOT
+# levered (delivery shorts not allowed on Groww; intraday only).
+ROBOT3_BUY_LEVERAGE     = 5.0    # 5× leverage on BUY orders
+
 
 # ════════════════════════════════════════════════════════════════════════════════
 # SECTION 2 — DATA CLASSES (all JSON-serialisable via asdict)
@@ -153,6 +161,7 @@ class PositionSizeResult:
     # Meta
     timestamp:            str
     warnings:             List[str] = field(default_factory=list)
+    leverage_applied:     float = 1.0  # Robot 3.O: 5× on BUY, 1× on SELL
 
 
 @dataclass
@@ -730,14 +739,28 @@ def compute_position_size(
         candidate *= LIVE_MODE_SAFETY_MULT
         warnings.append(f"🔴 LIVE MODE: position reduced by {(1-LIVE_MODE_SAFETY_MULT)*100:.0f}% safety margin.")
 
+    # ── Robot 3.O: 5× leverage on BUY (MIS intraday margin) ───────────────────
+    # Scales quantity/position value by ROBOT3_BUY_LEVERAGE for long entries.
+    # SL/TP price levels are NOT changed — only share count scales, so absolute
+    # risk in ₹ also scales by the leverage factor (paper + live both modes).
+    leverage_applied = 1.0
+    if direction == "BUY" and ROBOT3_BUY_LEVERAGE > 1.0:
+        candidate *= ROBOT3_BUY_LEVERAGE
+        leverage_applied = ROBOT3_BUY_LEVERAGE
+        warnings.append(
+            f"⚡ Robot 3.O Leverage: BUY position × {ROBOT3_BUY_LEVERAGE:.1f} (MIS intraday margin)"
+        )
+
     final_qty   = max(1, int(candidate / price))
     final_pos   = final_qty * price
     final_risk  = final_qty * sl_distance
     final_risk_pct = (final_risk / capital) * 100.0
 
     # ── Warnings ──────────────────────────────────────────────────────────────
-    if final_risk_pct > MAX_RISK_PCT * 100 * 1.1:
-        warnings.append(f"⚠️  Computed risk per trade ({final_risk_pct:.2f}%) exceeds 2% guideline.")
+    # With leverage, the 2% risk guideline applies to UN-LEVERED equivalent risk.
+    unlevered_risk_pct = final_risk_pct / max(leverage_applied, 1.0)
+    if unlevered_risk_pct > MAX_RISK_PCT * 100 * 1.1:
+        warnings.append(f"⚠️  Computed risk per trade ({final_risk_pct:.2f}%, unlevered {unlevered_risk_pct:.2f}%) exceeds 2% guideline.")
     if vol_regime == "HIGH":
         warnings.append("🔶 High volatility regime — position size reduced 25%.")
     elif vol_regime == "EXTREME":
@@ -745,9 +768,10 @@ def compute_position_size(
 
     logger.info(
         "[PositionSize] capital=₹%.0f | kelly=₹%.0f ATR=₹%.0f vol=₹%.0f → final=₹%.0f qty=%d | "
-        "risk=₹%.0f (%.2f%%) | SL=₹%.2f TP=₹%.2f | regime=%s",
+        "risk=₹%.0f (%.2f%%) | SL=₹%.2f TP=₹%.2f | regime=%s | leverage=%.1fx | dir=%s",
         capital, kelly_pos, atr_pos, vol_pos, final_pos, final_qty,
         final_risk, final_risk_pct, sl_price, tp_price, vol_regime,
+        leverage_applied, direction,
     )
 
     return PositionSizeResult(
@@ -773,6 +797,7 @@ def compute_position_size(
         sl_distance_pct     = round(sl_dist_pct, 4),
         timestamp           = ts,
         warnings            = warnings,
+        leverage_applied    = float(leverage_applied),
     )
 
 
@@ -1085,7 +1110,6 @@ class RiskPortfolioManager:
         else:
             logger.warning("[RPM] Price fetch failed — using fallback position size")
             # Fallback: ATR-based without price
-            risk_inr  = capital * 0.01
             est_price = target * 100   # rough estimate
             pos_result = compute_position_size(
                 capital=capital, daily_target=target, price=est_price,
@@ -1515,4 +1539,5 @@ __all__ = [
     "compute_dynamic_risk_budget",
     "compute_rpm_reward",
     "get_volatility_regime",
+    "ROBOT3_BUY_LEVERAGE",
 ]
