@@ -1714,6 +1714,7 @@ async def get_pcr(symbol: str):
 
 
 
+@api_router.get("/option/intraday")
 async def get_option_intraday(
     underlying: str = Query(..., description="NIFTY | BANKNIFTY | FINNIFTY | MIDCPNIFTY"),
     strike: float = Query(..., description="Strike price (e.g., 23800)"),
