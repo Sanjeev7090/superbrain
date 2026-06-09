@@ -1,193 +1,114 @@
-<analysis>**original_problem_statement**: 
-Upgrade the existing FastAPI + React repository into a World Top 1% Institutional-Grade Fully Autonomous Robo-Trader.
-PRODUCT REQUIREMENTS:
-- **Phase 3**: Execution Engine + Auto Trading Loop (Groww integration, Paper/Live mode, continuous scanning loop, dynamic tracking).
-- **Phase 4**: Frontend Robo Advisor Dashboard (Real-time feasibility, agent cards, trade explainability, lightweight charts).
-- **Phase 5**: Final Polish, Testing, Deployment & Production Readiness (Docker, CI/CD, Observability, Security middleware, Pytest).
+<analysis><original_problem_statement>
+Clone the repository  100% same to same. PRODUCT REQUIREMENTS: Upgrade the existing FastAPI + React repository into a World Top 1% Institutional-Grade Fully Autonomous Robo-Trader.
+</original_problem_statement>
 
-**User's preferred language**: The user writes technical requirements in English, but uses **Hinglish (Hindi written in English)** for operational commands and corrections (e.g., *Sirf jo mane image diya usme change karna hai, Jo highlight kiya mane BAs usko*).
-INSTRUCT NEXT AGENT: You MUST respond in Hinglish or English based on the user's prompt. **CRITICAL: Acknowledge and respect the user's instruction in Hinglish to NOT take any screenshots unless explicitly asked.**
+**User's preferred language**: Hindi (Roman Script / Hinglish). You MUST automatically detect the user's primary language from their messages and INSTRUCT next agent to respond in the user's preferred language only.
 
 **what currently exists?** 
-A full-stack application featuring a DreamerV3-powered autonomous robo-trader (Phase 3 and 4 implemented). Phase 5 files (Docker, CI/CD, tests, security middleware) have been scaffolded but remain untested. Most recently, the UI was updated to rename a specific agent card label from Dreamer V3 to Robot 3.O as per the user's precise image highlights.
+A full-stack (FastAPI, React, MongoDB) algorithmic trading dashboard (Gann Angles Trader API / Robot 3.O). It features live tracking, options chain fetching, paper/live autonomous trading, RL agent training, persistent history, multi-stock parallel trading (watchlist), and a new Auto-Discover module for scanning high-momentum stocks.
 
-**Last working item**: 
-- **Last item agent was working**: The user interrupted the workflow with an image to request a specific text change in the UI (Dreamer V3 to Robot 3.O). The agent initially replaced multiple instances but the user corrected it strictly to *Jo highlight kiya mane BAs usko* (Only the one I highlighted). The agent successfully reverted extra changes, leaving only the Robo tab agent name updated in .
-- **Status**: USER VERIFICATION PENDING
-- **Agent Testing Done**: N (Minor text change; user strictly forbade screenshots previously).
-- **Which testing method agent to use?**: backend manual testing (run ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: langsmith-0.8.9, anyio-4.13.0
-collected 414 items / 2 errors
-
-==================================== ERRORS ====================================
-__________ ERROR collecting backend/tests/test_auto_scan_mirofish.py ___________
-backend/tests/test_auto_scan_mirofish.py:14: in <module>
-    BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E   AttributeError: 'NoneType' object has no attribute 'rstrip'
-_________ ERROR collecting backend/tests/test_most_active_breakout.py __________
-backend/tests/test_most_active_breakout.py:13: in <module>
-    assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
-E   AssertionError: REACT_APP_BACKEND_URL must be set
-E   assert ''
-=========================== short test summary info ============================
-ERROR backend/tests/test_auto_scan_mirofish.py - AttributeError: 'NoneType' o...
-ERROR backend/tests/test_most_active_breakout.py - AssertionError: REACT_APP_...
-!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
-============================== 2 errors in 1.07s ===============================), followed by  for the pending Phase 5 middleware verification.
+**Last working item**:
+- **Last item agent was working**: Implementing the Auto-Discover feature. The user requested an enhancement to auto-discover high momentum stocks to add to the watchlist. The agent created the  endpoint in  and the corresponding UI in . 
+- **Status**: TESTING PENDING (Code is written and manually smoke-tested, but the  hit a SIGTERM/container termination before it could run pytest and frontend tests).
+- **Agent Testing Done**: Y (Manual curl & screenshot smoke test done, but automated suite got interrupted).
+- **Which testing method agent to use?**: testing_agent_v4_fork (To properly validate the newly added Auto-Discover feature and ensure no regressions).
 - **User Testing Done**: N
 
-**All Pending/In progress Issue list**: 
-None active. However, validation of Phase 5 components is critically pending.
+**All Pending/In progress Issue list**:
+*None.*
 
-**In progress Task List**: 
-Task 1: Phase 5 Verification & Finalization [P0]
-  - Where to resume: The agent got sidetracked by the UI text change. You must resume validating the previously created middleware (), test files in , and  integrations. Start the backend to ensure the new middleware doesn't crash the server. Run ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: langsmith-0.8.9, anyio-4.13.0
-collected 414 items / 2 errors
+**In progress Task List**:
+Task 1: Auto-Discover Feature Validation & Finalization (P0)
 
-==================================== ERRORS ====================================
-__________ ERROR collecting backend/tests/test_auto_scan_mirofish.py ___________
-backend/tests/test_auto_scan_mirofish.py:14: in <module>
-    BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E   AttributeError: 'NoneType' object has no attribute 'rstrip'
-_________ ERROR collecting backend/tests/test_most_active_breakout.py __________
-backend/tests/test_most_active_breakout.py:13: in <module>
-    assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
-E   AssertionError: REACT_APP_BACKEND_URL must be set
-E   assert ''
-=========================== short test summary info ============================
-ERROR backend/tests/test_auto_scan_mirofish.py - AttributeError: 'NoneType' o...
-ERROR backend/tests/test_most_active_breakout.py - AssertionError: REACT_APP_...
-!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
-============================== 2 errors in 0.37s =============================== locally. Call the testing subagent to ensure end-to-end functionality remains intact.
-  - What will be achieved with this: Successful completion of Phase 5, ensuring production readiness without regressions.
-  - Status: TESTING PENDING
-  - Should Test frontend/backend/both after fix?: Both (Backend is critical due to middleware injection).
-  - Blocked on something: None
+Task Detail:
+- Task 1:
+    - Where to resume: Run  to fully validate the backend logic and frontend UI for the Auto-Discover feature. After passing, update  and use the  tool.
+    - What will be achieved with this?: Guaranteed stability for the new auto-discover momentum scanner without breaking existing robo router endpoints.
+    - Status: TESTING PENDING
+    - Should Test frontend/backend/both after fix?: Both
+    - Blocked on something: Nothing.
 
-**Upcoming and Future Tasks**
-Upcoming Tasks:
-- Wire  into the existing DreamerV3 training environment (modify  observation space) [P1]. 
-Future Tasks:
-- Implement multi-ticker portfolio mode and sector rotation for the Robo-Trader [P1]. 
+**Upcoming and Future Tasks**:
+- Test Live mode entries threshold check (currently set to 50% in ). (P1)
+- Update frontend UI to show the 5x Leverage badge / display leverage applied on the trade cards. (P2)
+- Adjust Daily trades limit / cooldown configurations. (P2)
+- Refactor  to break it down into modular routers. (P3)
+- Implement PCR Alert system and MongoDB-persisted observability metrics. (P3)
+- Co-location / real broker API integration (Zerodha Kite, Angel One). (P3)
 
-**Completed work in this session**
-- Specific UI Text update: Renamed highlighted agent card title from Dreamer V3 to Robot 3.O in  while explicitly leaving other instances (logos, bottom section) intact per user instructions (DONE).
+**Completed work in this session**:
+- Multi-Stock Parallel Trading Support: Added Watchlist and max parallel trades (1-5) support in backend (, , ) and frontend modal. (DONE)
+- Kronos Stale Data Bug Fix: Cleared old stock state in  when user switches stocks. (DONE)
+- Disk Space Cleanup: Cleared  to resolve a [Errno 28] No space left on device error during screenshoting/testing. (DONE)
+- Auto-Discover Feature Implementation: Added backend endpoint and frontend UI. (DONE - Pending automated testing)
 
-**Earlier issues found/mentioned but not fixed**
-None.
+**Earlier issues found/mentioned but not fixed**:
+*None.*
 
-**Known issue recurrence from previous fork**
-- Issue recurrence in previous fork: None
+**Known issue recurrence from previous fork**:
+- Issue recurrence in previous fork: N/A
 - Recurrence count: 0
-- Status: NOT STARTED
+- Status: N/A
 
-**Code Architecture**
+**Code Architecture**:
 
 
-**Key Technical Concepts**
-React 19, FastAPI, MongoDB, Reinforcement Learning (DreamerV3), Groww API, APScheduler, Prometheus Metrics, Pytest, Docker, GitHub Actions CI/CD.
+**Key Technical Concepts**:
+Frontend: React, Tailwind CSS, lightweight-charts.
+Backend: FastAPI, Python, PyMongo (Sync), Motor (Async), APScheduler, RL Agent (DreamerV3) implementation.
+Database: MongoDB.
 
-**key DB schema**
-- : , , , , .
+**key DB schema**:
+- : 
 
-**changes in tech stack**
-- Added , , ,  (From earlier Phase 3/4 fixes).
+**changes in tech stack**:
+- None in this session.
 
-**All files of reference** 
-1.  (Modified: Renamed Dreamer V3 to Robot 3.O on agent card).
-2.  (Phase 5 Security/Metrics - Untested).
-3.  (Modified heavily for Phase 5 middleware in a previous fork - Untested).
-4.  (Newly created unit tests - Untested).
+**All files of reference**:
+-  (Watchlist & Auto-Discover endpoints)
+-  (State updates for watchlist/max_trades)
+-  (Execution loop modified for multi-stock)
+-  (Watchlist and Auto-Discover UI)
+-  (Stale data bug fix)
 
-**Areas that need refactoring**: 
- has grown large and has many middleware/router attachments.
+**Areas that need refactoring**:
+-  is getting very large and was noted in the backlog for a breakdown into modular routers.
 
-**key api endpoints**
+**key api endpoints**:
 - 
 - 
 - 
+
+**Critical Info for New Agent**:
+- **Language**: Always interact with the user in **Hinglish/Hindi (Roman Script)**.
+- **Disk Space**: The agent encountered a  error which was fixed by deleting pip caches. Monitor disk space if doing extensive screenshotting or logging.
+- **Testing**: The  was called for the Auto-Discover feature but terminated abruptly. You must rerun the testing agent to validate the feature.
+- **Database Threading Issue**: Backend uses  as the DB name and  (synchronous) for background executions.
+
+**documents and test reports created in this job**:
 - 
+-  (Partial due to termination)
 
-**Critical Info for New Agent** 
-- **NO SCREENSHOTS**: The user explicitly instructed in Hinglish previously: *Abhi se koi bhi prompt dunga toh Screenshoot lekar nai show karna hai*. Do NOT take screenshots unless explicitly requested by the user.
-- **Phase 5 Verification Priority**: The last agent handled a minor UI interruption and finished without executing Phase 5 testing. The newly injected  middleware and Telegram notifier in  remain **UNTESTED**. Your immediate priority is to verify that FastAPI boots cleanly, existing API calls succeed, and the newly created ============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: langsmith-0.8.9, anyio-4.13.0
-collected 414 items / 2 errors
-
-==================================== ERRORS ====================================
-__________ ERROR collecting backend/tests/test_auto_scan_mirofish.py ___________
-backend/tests/test_auto_scan_mirofish.py:14: in <module>
-    BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E   AttributeError: 'NoneType' object has no attribute 'rstrip'
-_________ ERROR collecting backend/tests/test_most_active_breakout.py __________
-backend/tests/test_most_active_breakout.py:13: in <module>
-    assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
-E   AssertionError: REACT_APP_BACKEND_URL must be set
-E   assert ''
-=========================== short test summary info ============================
-ERROR backend/tests/test_auto_scan_mirofish.py - AttributeError: 'NoneType' o...
-ERROR backend/tests/test_most_active_breakout.py - AssertionError: REACT_APP_...
-!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
-============================== 2 errors in 0.39s =============================== test suite passes. Do NOT proceed to upcoming features until the backend is confirmed stable.
-
-**documents and test reports created in this job**
--  (Testing for Phase 4)
-- 
-- 
-
-**Last 10 User Messages and any pending HUMAN messages** 
-1.  - (COMPLETED)
-2.  - (Agent attempted global rename)
-3.  - (Agent reverted to 4 visible UI locations)
-4.  - (Agent reverted all except the specific Robo tab agent name highlight). COMPLETED.
+**Last 10 User Messages and any pending HUMAN messages**:
+1. User: Please use ask_human tool and confirm your plan now. (Completed)
+2. User: Robot 3.O Ek sath multiple stock ke sath condition meet karke minimum 3trade parallel max 5 parallel run kar sake Also fix this with Kronos jab Mai main chart me Stock load karu tab Kronos me pehle wala stock ka data rah ja raha hai usko fix karo (Completed)
+3. User: Auto discover wala idea acha kar do (Implementation Completed, Testing Pending)
 
 **Project Health Check:**
-- Broken/Mocked: Phase 5 components (Tests, Middleware) remain untested and could potentially crash . 
+Healthy. No broken components, but final test suite for latest feature got interrupted.
 
-**3rd Party Integrations**
-- Groww API (Execution - requires User API Key)
-- Telegram (Notifier - requires bot token)
-- Emergent LLM (Available via  in environment for analysis endpoints)
+**3rd Party Integrations**:
+- OpenAI/Emergent LLM (Requires Emergent LLM Key)
+- yfinance / NSE / BSE scrapers (Public APIs)
 
-**Testing status**
-- Testing agent used after significant changes: NO (Pending for Phase 5 changes).
+**Testing status**:
+- Testing agent used after significant changes: YES (Interrupted on the last run)
 - Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: , , 
-- Known regressions: None confirmed, but backend startup behavior must be validated.
+- Test files created: None
+- Known regressions: None
 
-**Credentials to test flow:**
-N/A
+**Credentials to test flow**:
+None specific, managed by Emergent LLM key in .
 
-**What agent forgot to execute**
-The agent addressed the UI renaming interruption perfectly but completely forgot to return to the P0 task: testing Phase 5 components. It did not run the unit tests (============================= test session starts ==============================
-platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
-rootdir: /app
-plugins: langsmith-0.8.9, anyio-4.13.0
-collected 414 items / 2 errors
-
-==================================== ERRORS ====================================
-__________ ERROR collecting backend/tests/test_auto_scan_mirofish.py ___________
-backend/tests/test_auto_scan_mirofish.py:14: in <module>
-    BASE_URL = os.environ.get('REACT_APP_BACKEND_URL').rstrip('/')
-               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-E   AttributeError: 'NoneType' object has no attribute 'rstrip'
-_________ ERROR collecting backend/tests/test_most_active_breakout.py __________
-backend/tests/test_most_active_breakout.py:13: in <module>
-    assert BASE_URL, "REACT_APP_BACKEND_URL must be set"
-E   AssertionError: REACT_APP_BACKEND_URL must be set
-E   assert ''
-=========================== short test summary info ============================
-ERROR backend/tests/test_auto_scan_mirofish.py - AttributeError: 'NoneType' o...
-ERROR backend/tests/test_most_active_breakout.py - AssertionError: REACT_APP_...
-!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!!
-============================== 2 errors in 0.39s ===============================) nor verify that the newly injected  middleware didn't crash . This must be done immediately.</analysis>
+**What agent forgot to execute**:
+The agent did not update  with the newly implemented Auto-Discover feature before the environment terminated. Make sure to update the PRD upon finishing the tests.</analysis>
