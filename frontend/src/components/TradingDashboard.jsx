@@ -763,26 +763,8 @@ const TradingDashboard = () => {
         {/* Right Sidebar */}
         <aside className={`lg:col-span-3 border-l border-slate-200 dark:border-white/10 bg-white dark:bg-[#0A0A0A] flex flex-col overflow-hidden transition-colors duration-200 ${mobilePanel !== 'right' ? 'hidden lg:flex' : 'flex'}`} data-testid="right-sidebar">
           <div className="flex flex-1 min-h-0">
-            {/* Vertical Tabs — compact left strip */}
-            <nav className="shrink-0 w-[52px] md:w-[60px] lg:w-[68px] flex flex-col border-r border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0D0D0D] overflow-y-auto scrollbar-none" data-testid="right-tabs-nav">
-              {rightTabs.map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-                  className={`relative py-2.5 md:py-3 px-1 text-[7px] md:text-[8px] lg:text-[8.5px] font-bold uppercase tracking-[0.04em] transition-all whitespace-nowrap text-center leading-tight ${
-                    activeTab === tab.id
-                      ? 'text-[#00E676] bg-[#00E676]/10 dark:bg-[#00E676]/5'
-                      : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/5'
-                  }`}
-                  data-testid={`tab-${tab.id}`}>
-                  {activeTab === tab.id && (
-                    <span className="absolute left-0 top-1 bottom-1 w-[2px] bg-[#00E676] rounded-r-full" />
-                  )}
-                  {tab.shortLabel || tab.label}
-                </button>
-              ))}
-            </nav>
-
-            {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto min-w-0">
+            {/* Tab Content — left side */}
+            <div className="flex-1 overflow-y-auto min-w-0 order-first">
             {activeTab === 'scanner' && (
               <AutoScanner
                 selectedStock={selectedStock}
@@ -869,6 +851,24 @@ const TradingDashboard = () => {
               </div>
             )}
             </div>
+
+            {/* Vertical Tabs — compact right strip */}
+            <nav className="shrink-0 w-[52px] md:w-[60px] lg:w-[68px] flex flex-col border-l border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0D0D0D] overflow-y-auto scrollbar-none order-last" data-testid="right-tabs-nav">
+              {rightTabs.map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`relative py-2.5 md:py-3 px-1 text-[7px] md:text-[8px] lg:text-[8.5px] font-bold uppercase tracking-[0.04em] transition-all whitespace-nowrap text-center leading-tight ${
+                    activeTab === tab.id
+                      ? 'text-[#00E676] bg-[#00E676]/10 dark:bg-[#00E676]/5'
+                      : 'text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-white/5'
+                  }`}
+                  data-testid={`tab-${tab.id}`}>
+                  {activeTab === tab.id && (
+                    <span className="absolute right-0 top-1 bottom-1 w-[2px] bg-[#00E676] rounded-l-full" />
+                  )}
+                  {tab.shortLabel || tab.label}
+                </button>
+              ))}
+            </nav>
           </div>
         </aside>
       </div>
