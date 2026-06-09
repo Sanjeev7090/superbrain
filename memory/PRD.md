@@ -49,6 +49,11 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - Settings modal: "Parallel Trading Watchlist" section with 1×–5× buttons + add/remove UI
 - Kronos stale data bug fixed: clears old forecast on stock change
 
+### Phase 7 — Auto-Discover + Vertical Tabs UI (Jun 2026)
+- **Auto-Discover Momentum Scanner**: `GET /api/robo/watchlist/discover` — scans NSE F&O universe (50 stocks, 8 workers), scores on momentum, volume spike, trend strength, RSI sweet zone (0–100), returns top 8 candidates. 5-min cache with `?refresh=true` override.
+- **Vertical Right Sidebar Tabs**: Replaced horizontal tab bar with vertical tab strip (left side of right panel). Compact labels (SCAN, STRAT, PAPER, RL, ROBO, AI ASM, PICK, PE-CE, QNT). Green left-border active indicator. Responsive: Desktop 68px, iPad 60px, Mobile 52px width.
+- Responsive across Desktop (1920px), iPad (1024px), Mobile (390px)
+
 ### Phase 5 — Linter Fix & Background Tab Persistence (Feb 2026)
 - Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py`
 - `RLAgentPanel` & `RoboDashboard` always mounted (CSS hide/show) — background training/polling continues on tab switch
@@ -129,13 +134,17 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ### P0 (Critical)
 - [ ] server.py refactoring — split into domain routers
+- [ ] DEMON endpoint bug — `run_mini_ai_indicator()` tuple unpacking mismatch (server.py:5325)
 
 ### P1 (Next)
+- [ ] Live mode entry threshold check (50% in trading_loop.py)
 - [ ] PCR Alert system — popup when NIFTY/SENSEX PCR crosses threshold
 - [ ] Deep UX testing — MultiTF Scanner flows, win probability arc
 - [ ] Persist observability metrics to MongoDB
 
 ### P2 (Enhancement)
+- [ ] 5x Leverage badge display on trade cards
+- [ ] Daily trades limit / cooldown config adjustments
 - [ ] Real tick data (NSE WebSocket subscription)
 - [ ] Reddit/X sentiment (needs API keys)
 - [ ] WhatsApp/Telegram share for scan results
