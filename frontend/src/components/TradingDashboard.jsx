@@ -124,8 +124,23 @@ const TradingDashboard = () => {
   const [sectorSheet, setSectorSheet] = useState(null); // sector obj for stocks sheet
   const [showVisualize, setShowVisualize] = useState(false); // Heatmaps/Network modal
   const [show3D, setShow3D] = useState(false); // 3D Gann chart
+  const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const { theme, toggleTheme } = useTheme();
   const wsRef = useRef(null);
+  const rlPollRef = useRef(null);
+
+  // Poll RL Agent status every 5s for background indicator
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await axios.get(`${BACKEND_URL}/api/rl-agent/status`);
+        setRlStatus(res.data);
+      } catch { /* silent */ }
+    };
+    poll();
+    rlPollRef.current = setInterval(poll, 5000);
+    return () => clearInterval(rlPollRef.current);
+  }, []);
 
   // Handler for strategy analysis completion - updates chart overlays
   const handleStrategyAnalysis = (strategyType, data) => {
@@ -591,7 +606,7 @@ const TradingDashboard = () => {
           </button>
           {/* DREAMER V3 ROBO-TRADER BUTTON */}
           <button
-            onClick={() => setActiveTab('robo')}
+            onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
             className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-violet-500/50 text-violet-400 hover:bg-violet-500/20 hover:border-violet-400 px-2.5 py-1.5 rounded transition-all"
             data-testid="robo-trader-btn"
             title="Dreamer V3 Robo-Trader"
@@ -599,6 +614,27 @@ const TradingDashboard = () => {
             <span className="text-sm">🤖</span>
             <span className="hidden sm:inline">ROBO</span>
           </button>
+
+          {/* RL AGENT BACKGROUND TRAINING INDICATOR — visible only when training & not on rlagent tab */}
+          {rlStatus?.status === 'training' && activeTab !== 'rlagent' && (
+            <button
+              onClick={() => { setActiveTab('rlagent'); setMobilePanel('right'); }}
+              data-testid="rl-training-indicator"
+              title={`DreamerV3 Training — Ep ${rlStatus.episode} · ${(rlStatus.timesteps_done/1000).toFixed(1)}K/${(rlStatus.timesteps_total/1000).toFixed(0)}K steps`}
+              className="flex items-center gap-1.5 px-2 py-1 rounded border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 transition-all cursor-pointer"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              </span>
+              <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest hidden sm:inline whitespace-nowrap">
+                DV3 · Ep {rlStatus.episode} · {Math.round((rlStatus.timesteps_done / rlStatus.timesteps_total) * 100)}%
+              </span>
+              <span className="text-[9px] font-bold text-amber-400 uppercase tracking-widest sm:hidden">
+                DV3
+              </span>
+            </button>
+          )}
         </div>
       </header>
 
