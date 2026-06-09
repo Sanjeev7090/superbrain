@@ -738,14 +738,14 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
         pred = rl.get_prediction(ticker)
         signal     = pred.get("signal", "HOLD")
         confidence = pred.get("confidence", 0)
-        trade_sig  = state.get("last_trade_signal", 0.0)
+        _trade_sig  = state.get("last_trade_signal", 0.0)
         weights    = pred.get("strategy_weights", {})
         wm_loss    = pred.get("wm_loss", 0.0)
 
         # Market context for position sizing
         ctx = _fetch_market_context(ticker)
         price     = ctx.get("price", 0.0)
-        atr_pct   = ctx.get("atr_pct", 0.015)
+        _atr_pct  = ctx.get("atr_pct", 0.015)
         atr14     = ctx.get("atr14", price * 0.015)
         regime    = ctx.get("regime", "UNKNOWN")
         rsi14     = ctx.get("rsi14", 50.0)
@@ -1008,7 +1008,7 @@ def _check_circuit_breakers(prefs: UserPreferences, risk: RiskProfile) -> Tuple[
     """Returns (tripped, reason) — if tripped, auto mode should pause."""
     with _lock:
         daily_pnl     = _state.get("daily_pnl", 0.0)
-        daily_dd      = _state.get("daily_drawdown", 0.0)
+        _daily_dd     = _state.get("daily_drawdown", 0.0)
         consec_losses = _state.get("consecutive_losses", 0)
         peak_cap      = _state.get("peak_capital", prefs.allocated_capital)
         cur_cap       = _state.get("current_capital", prefs.allocated_capital)

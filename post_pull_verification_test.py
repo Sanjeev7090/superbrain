@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 
 # Backend URL from frontend/.env
-BASE_URL = "https://bot-mirror-3.preview.emergentagent.com"
+BASE_URL = "https://dreamer-orchestrator.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 class Colors:

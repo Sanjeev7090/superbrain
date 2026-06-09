@@ -41,7 +41,13 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - Paper trading mode
 - Ensemble AI cockpit
 
-### Phase 4 — QUANT Module (Feb 2026) ← LATEST
+### Phase 5 — Linter Fix & Robo Entry Logic (Feb 2026) ← LATEST
+- Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py` (`trade_sig`, `atr_pct`, `daily_dd`)
+- Relaxed `META_CONFIDENCE_FLOOR` from 35→30, dynamic agent weights when DreamerV3 idle
+- 5X Leverage on BUY positions (paper + live)
+- Nifty/Sensex Options Chart fix (`/api/option/intraday`, `/api/option/sensex-intraday`)
+
+### Phase 4 — QUANT Module (Feb 2026)
 **Backend new files:**
 - `rl_agent/per_buffer.py` — Prioritized Experience Replay (SumTree, IS weights)
 - `rl_agent/risk_reward.py` — Risk-adjusted reward (Sharpe+CVaR+Kelly+Sortino)
