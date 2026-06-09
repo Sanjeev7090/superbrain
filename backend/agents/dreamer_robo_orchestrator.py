@@ -797,14 +797,22 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
             c_conf   = float(disc.get("consensus_confidence", 0))
             c_score  = float(disc.get("weighted_score", 0))
 
-            # Blend: 60% DreamerV3 + 40% agent consensus
+            # Dynamic blend weights: if DreamerV3 is idle/HOLD, give agents full weight
+            # (otherwise their 40% share alone rarely crosses the entry gate).
+            dreamer_is_idle = (signal == "HOLD" or effective_confidence < 10)
+            if dreamer_is_idle:
+                w_dreamer, w_agents = 0.0, 1.0
+            else:
+                w_dreamer, w_agents = 0.60, 0.40
+
             dreamer_numeric = (1 if signal == "BUY" else -1 if signal == "SELL" else 0) * effective_confidence
             agent_numeric   = (1 if c_signal == "BUY" else -1 if c_signal == "SELL" else 0) * c_conf
-            blended_numeric = dreamer_numeric * 0.60 + agent_numeric * 0.40
+            blended_numeric = dreamer_numeric * w_dreamer + agent_numeric * w_agents
 
-            if abs(blended_numeric) >= 25:
+            # Lowered gate from ±25 to ±15 to match collaborator's consensus threshold.
+            if abs(blended_numeric) >= 15:
                 blended_signal = "BUY" if blended_numeric > 0 else "SELL"
-                blended_conf   = int(min(98, abs(blended_numeric)))
+                blended_conf   = int(min(98, max(30, abs(blended_numeric))))
             else:
                 blended_signal = "HOLD"
                 blended_conf   = max(10, int(50 - abs(blended_numeric)))

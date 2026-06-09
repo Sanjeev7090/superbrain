@@ -1404,11 +1404,12 @@ class StrategyCollaborator:
             for s in signals
         ) / total_weight
 
-        # Consensus signal
-        if weighted_score > 25:
+        # Consensus signal — thresholds lowered to ±15 so mild directional bias triggers entries.
+        # (Earlier ±25 was too conservative in quiet/sideways markets where most agents return HOLD.)
+        if weighted_score > 15:
             consensus     = "BUY"
             consensus_conf = min(95.0, 40 + abs(weighted_score))
-        elif weighted_score < -25:
+        elif weighted_score < -15:
             consensus     = "SELL"
             consensus_conf = min(95.0, 40 + abs(weighted_score))
         else:

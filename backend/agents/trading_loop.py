@@ -57,8 +57,8 @@ except ImportError:
 DEFAULT_INTERVAL_MIN  = 5     # scan every 5 minutes (minimum 1, maximum 30)
 MIN_INTERVAL_MIN      = 1
 MAX_INTERVAL_MIN      = 30
-META_CONFIDENCE_FLOOR = 35    # minimum meta-confidence to execute (paper)
-META_CONFIDENCE_LIVE  = 55    # live mode threshold
+META_CONFIDENCE_FLOOR = 30    # minimum meta-confidence to execute (paper) — matches ExecEngine MIN_CONFIDENCE_PAPER
+META_CONFIDENCE_LIVE  = 50    # live mode threshold
 
 # NSE trading hours (IST = UTC+5:30)
 NSE_OPEN_H,  NSE_OPEN_M  = 9,  15
@@ -426,7 +426,14 @@ class TradingLoop:
             signal     = meta.get("signal", "HOLD")
             confidence = meta.get("confidence", 0)
 
-            if signal in ("BUY", "SELL") and confidence >= META_CONFIDENCE_FLOOR:
+            # Mode-aware confidence floor: paper 30%, live 50%
+            try:
+                from agents.execution_engine import MODE_LIVE as _MODE_LIVE
+                conf_floor = META_CONFIDENCE_LIVE if engine._mode == _MODE_LIVE else META_CONFIDENCE_FLOOR
+            except Exception:
+                conf_floor = META_CONFIDENCE_FLOOR
+
+            if signal in ("BUY", "SELL") and confidence >= conf_floor:
                 qty        = risk_profile.get("quantity", 1) or 1
                 sl_price   = risk_profile.get("sl_price", 0.0)
                 tp_price   = risk_profile.get("tp_price", 0.0)
@@ -479,8 +486,8 @@ class TradingLoop:
                                 cycle_id, exec_result.get("error", "?"))
             else:
                 _upd(status="scanning")
-                logger.info("[TradingLoop][%s] HOLD | signal=%s conf=%.0f%%",
-                            cycle_id, signal, confidence)
+                logger.info("[TradingLoop][%s] HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
+                            cycle_id, signal, confidence, conf_floor)
 
             # ── Step 12: Update loop state ────────────────────────────────────
             with _lock:
@@ -618,11 +625,18 @@ class TradingLoop:
 
         if vol_ratio >= 1.5:
             tech_score += 10 if tech_score >= 0 else -10   # volume confirms direction
+        elif vol_ratio >= 1.0 and tech_score != 0:
+            tech_score += 5 if tech_score > 0 else -5      # mild volume support
 
+        # RSI scoring — extreme + mid-zones
         if rsi14 > 75:
             tech_score -= 15   # overbought
         elif rsi14 < 25:
             tech_score += 15   # oversold (contrarian + momentum)
+        elif rsi14 >= 60 and rsi14 <= 70:
+            tech_score -= 8    # mild overbought
+        elif rsi14 >= 30 and rsi14 <= 40:
+            tech_score += 8    # mild oversold
 
         if atr_pct > EXTREME_VOL_PCT:
             tech_score = tech_score * 0.5   # halve confidence in extreme vol
@@ -647,9 +661,10 @@ class TradingLoop:
             final_conf   = float(np.clip(abs(combined_score), 0, 100))
             source       = "dreamer+technical"
         else:
-            # Only technical
+            # Only technical → boost confidence since tech now carries 100% weight (not 40%)
+            # Scale factor 1.5× lets the same tech_score reach actionable thresholds.
             final_signal = tech_signal
-            final_conf   = tech_conf
+            final_conf   = float(np.clip(tech_conf * 1.5, 0, 100))
             source       = "technical_only"
 
         # Risk budget multiplier
