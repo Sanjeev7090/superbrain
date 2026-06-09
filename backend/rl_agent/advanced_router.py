@@ -279,7 +279,16 @@ async def fear_greed(
 async def trade_metrics():
     try:
         from observability.metrics_engine import get_metrics
-        return get_metrics()
+        from rl_agent import dreamer_trainer as dt
+        m = get_metrics()
+        # Merge dreamer continuous-training state into metrics response
+        ds = dt.get_state()
+        m["continuous_mode"]       = ds.get("continuous_mode", False)
+        m["continuous_cycles"]     = ds.get("continuous_cycles", 0)
+        m["continuous_cycle_step"] = ds.get("continuous_cycle_step", 0)
+        m["continuous_cycle_total"]= ds.get("continuous_cycle_total", 200)
+        m["timesteps_done"]        = ds.get("timesteps_done", 0)
+        return m
     except Exception as exc:
         return {"error": str(exc)}
 

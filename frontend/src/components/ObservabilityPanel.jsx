@@ -264,7 +264,11 @@ export default function ObservabilityPanel({ selectedStock }) {
             {contRunning && (
               <div className="flex items-center gap-1.5 text-[11px] text-green-400">
                 <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                Cycle {m.continuous_cycles || 0} running — {(m.timesteps_done || 0).toLocaleString()} total steps
+                Cycle {m.continuous_cycles || 0} running
+                {m.continuous_cycle_step > 0
+                  ? ` — Step ${m.continuous_cycle_step}/${m.continuous_cycle_total || 200} · ${(m.timesteps_done || 0).toLocaleString()} total`
+                  : ` — ${(m.timesteps_done || 0).toLocaleString()} total steps`
+                }
               </div>
             )}
           </div>

@@ -1238,12 +1238,14 @@ def _continuous_worker(ticker: str):
         try:
             from .trading_env import TradingEnv
             model_path = str(MODELS_DIR / f"dreamer_{ticker.replace('.', '_')}.pt")
-            if not os.path.exists(model_path):
-                time.sleep(30)
-                continue
-
             agent = DreamerV3Agent()
-            agent.load(model_path)
+            if os.path.exists(model_path):
+                agent.load(model_path)
+            else:
+                # No pre-trained model — start from scratch and save initial weights
+                logger.info("No model found for %s — initialising fresh DreamerV3 for continuous training", ticker)
+                MODELS_DIR.mkdir(parents=True, exist_ok=True)
+                agent.save(model_path)
             env   = TradingEnv(ticker=ticker)
             global _per_buffer, _rr_engine
 
@@ -1288,6 +1290,10 @@ def _continuous_worker(ticker: str):
                         agent.update_world_model(b)
                         agent.update_actor_critic(b)
 
+                # Update UI progress every 20 steps
+                if step % 20 == 0:
+                    _upd(continuous_cycle_step=step, continuous_cycle_total=200)
+
             agent.save(model_path)
             cycles += 1
             _upd(
@@ -1297,7 +1303,7 @@ def _continuous_worker(ticker: str):
             logger.info("Continuous cycle %d done for %s", cycles, ticker)
 
         except Exception as exc:
-            logger.debug("Continuous loop error: %s", exc)
+            logger.warning("Continuous loop error (cycle %d): %s", cycles, exc, exc_info=True)
 
         # Wait before next cycle
         for _ in range(60):
