@@ -4,7 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend,
   ResponsiveContainer, ReferenceLine, CartesianGrid,
 } from 'recharts';
-import { X, MagnifyingGlass, Spinner, TrendUp, TrendDown, Lightning } from '@phosphor-icons/react';
+import { X, MagnifyingGlass, Spinner, TrendUp, TrendDown, Lightning, ChartLine } from '@phosphor-icons/react';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api/options`;
@@ -18,7 +18,7 @@ const SIGNAL_STYLE = {
 const fmtINR = (v) => `₹${Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const fmtPct = (v) => `${Number(v) > 0 ? '+' : ''}${Number(v).toFixed(3)}%`;
 
-const PutCallParityScanner = ({ onClose }) => {
+const PutCallParityScanner = ({ onClose, onLoadChart }) => {
   const [scanData, setScanData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -140,7 +140,7 @@ const PutCallParityScanner = ({ onClose }) => {
           {scanData?.best && (
             <>
               {/* Best Opportunity Card */}
-              <BestOppCard row={selectedRow} isOverride={selectedRowIdx !== 0} />
+              <BestOppCard row={selectedRow} isOverride={selectedRowIdx !== 0} onLoadChart={onLoadChart} />
 
               {/* Payoff chart */}
               <div className="bg-slate-800/40 rounded-lg p-3 border border-white/5">
@@ -188,6 +188,7 @@ const PutCallParityScanner = ({ onClose }) => {
                         <th className="px-3 py-2 text-right">Mispricing</th>
                         <th className="px-3 py-2 text-right">%</th>
                         <th className="px-3 py-2 text-center">Signal</th>
+                        <th className="px-3 py-2 text-center">Chart</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -216,6 +217,18 @@ const PutCallParityScanner = ({ onClose }) => {
                               <span className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${sig.color} ${sig.bg} ${sig.border}`}>
                                 {sig.label}
                               </span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {onLoadChart && row.parity.signal !== 'FAIRLY_PRICED' && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); onLoadChart(row); }}
+                                  title="Open on Chart with Buy/SL/Target"
+                                  className="p-1 rounded hover:bg-indigo-500/30 text-indigo-400 hover:text-indigo-200 transition"
+                                  data-testid={`load-chart-btn-${idx}`}
+                                >
+                                  <ChartLine size={14} weight="bold" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         );
@@ -254,7 +267,7 @@ const PutCallParityScanner = ({ onClose }) => {
   );
 };
 
-const BestOppCard = ({ row, isOverride }) => {
+const BestOppCard = ({ row, isOverride, onLoadChart }) => {
   if (!row) return null;
   const sig = SIGNAL_STYLE[row.parity.signal] || SIGNAL_STYLE.FAIRLY_PRICED;
   const isPositive = row.parity.mispricing > 0;
@@ -273,14 +286,26 @@ const BestOppCard = ({ row, isOverride }) => {
             {sig.label}
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-xs text-slate-400">Mispricing</div>
-          <div className={`text-3xl font-bold ${isPositive ? 'text-rose-400' : 'text-emerald-400'}`}>
-            {fmtPct(row.parity.mispricing_pct)}
+        <div className="flex flex-col items-end gap-2">
+          <div className="text-right">
+            <div className="text-xs text-slate-400">Mispricing</div>
+            <div className={`text-3xl font-bold ${isPositive ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {fmtPct(row.parity.mispricing_pct)}
+            </div>
+            <div className="text-xs text-slate-500">
+              {isPositive ? '+' : ''}{row.parity.mispricing} pts ({fmtINR(Math.abs(row.parity.mispricing))})
+            </div>
           </div>
-          <div className="text-xs text-slate-500">
-            {isPositive ? '+' : ''}{row.parity.mispricing} pts ({fmtINR(Math.abs(row.parity.mispricing))})
-          </div>
+          {onLoadChart && row.parity.signal !== 'FAIRLY_PRICED' && (
+            <button
+              onClick={() => onLoadChart(row)}
+              data-testid="open-in-chart-btn"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition"
+            >
+              <ChartLine size={14} weight="bold" />
+              Open in Chart
+            </button>
+          )}
         </div>
       </div>
 

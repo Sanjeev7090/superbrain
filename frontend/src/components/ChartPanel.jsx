@@ -154,7 +154,7 @@ function computeSMCData(bars) {
 const ChartPanel = ({
   stockData, loading, selectedStock, onPivotSelect, pivotPoint, gannFan,
   semiLogScale, setSemiLogScale, timeframe, onTimeframeChange, isCrypto,
-  dataSource, onDataSourceChange, activeStrategy, strategyData
+  dataSource, onDataSourceChange, activeStrategy, strategyData, tradeSignal
 }) => {
   const chartContainerRef = useRef();
   const chartRef = useRef(null);
@@ -170,6 +170,8 @@ const ChartPanel = ({
   const smcCanvasRef = useRef(null);
   const smcDataRef   = useRef(null);
   const smcAnimRef   = useRef(null);
+  // Trade Signal (Parity Scanner) price lines
+  const tradeSignalLinesRef = useRef([]);
   const [smcActive, setSmcActive] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [selectMode, setSelectMode] = useState(null);
@@ -833,6 +835,28 @@ const ChartPanel = ({
     chartRef.current.timeScale().fitContent();
   }, [stockData]);
 
+  // ── Parity Trade Signal Lines (Buy/Sell/SL/Target) ────────────
+  useEffect(() => {
+    const series = candlestickSeriesRef.current;
+    // Clear old lines
+    tradeSignalLinesRef.current.forEach(pl => { try { series?.removePriceLine(pl); } catch(e) {} });
+    tradeSignalLinesRef.current = [];
+    if (!tradeSignal || !series) return;
+    const { direction, entry, sl, target } = tradeSignal;
+    const isBuy = direction === 'BUY';
+    const defs = [
+      { price: entry,  color: isBuy ? '#3B82F6' : '#F59E0B', title: `${direction} ENTRY`, lineStyle: 0, lineWidth: 2 },
+      { price: sl,     color: '#FF3B30',                      title: 'SL',                lineStyle: 2, lineWidth: 1 },
+      { price: target, color: '#00E676',                      title: 'TARGET',             lineStyle: 2, lineWidth: 1 },
+    ];
+    tradeSignalLinesRef.current = defs.map(d => {
+      try {
+        return series.createPriceLine({ price: d.price, color: d.color, lineWidth: d.lineWidth, lineStyle: d.lineStyle, axisLabelVisible: true, title: d.title });
+      } catch(e) { return null; }
+    }).filter(Boolean);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeSignal, stockData]);
+
   // ── Volume Profile: fetch when stock/data changes ──────────────
   useEffect(() => {
     clearVPLines();
@@ -1186,6 +1210,22 @@ const ChartPanel = ({
             <ChartLine size={48} className="text-slate-300 dark:text-zinc-700 mb-3" />
             <p className="text-sm text-slate-400 dark:text-zinc-500">Select a stock or crypto to view chart</p>
             <p className="text-[10px] text-slate-300 dark:text-zinc-600 mt-1 font-mono">Scroll to zoom / Drag to pan</p>
+          </div>
+        )}
+
+        {/* Parity Trade Signal Pill — top left overlay */}
+        {tradeSignal && (
+          <div className={`absolute top-2 left-2 z-20 flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold shadow-lg border backdrop-blur-sm
+            ${tradeSignal.direction === 'BUY'
+              ? 'bg-emerald-900/80 border-emerald-500/50 text-emerald-300'
+              : 'bg-rose-900/80 border-rose-500/50 text-rose-300'}`}
+            data-testid="trade-signal-pill"
+          >
+            <span>{tradeSignal.direction === 'BUY' ? '▲' : '▼'} {tradeSignal.symbol} {tradeSignal.direction}</span>
+            <span className="text-white/60">|</span>
+            <span className="text-slate-300">E: {tradeSignal.entry}</span>
+            <span className="text-red-400">SL: {tradeSignal.sl}</span>
+            <span className="text-emerald-400">T: {tradeSignal.target}</span>
           </div>
         )}
 

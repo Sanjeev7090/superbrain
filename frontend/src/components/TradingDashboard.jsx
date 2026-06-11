@@ -127,6 +127,7 @@ const TradingDashboard = () => {
   const [showVisualize, setShowVisualize] = useState(false); // Heatmaps/Network modal
   const [show3D, setShow3D] = useState(false); // 3D Gann chart
   const [showParityScanner, setShowParityScanner] = useState(false); // Put-Call Parity F&O Scanner
+  const [parityTradeSignal, setParityTradeSignal] = useState(null); // Trade signal from Parity Scanner
   const [showHybridBrain, setShowHybridBrain] = useState(false); // Hybrid Super Brain
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const { theme, toggleTheme } = useTheme();
@@ -304,6 +305,57 @@ const TradingDashboard = () => {
     BANKNIFTY: { ticker: '^NSEBANK', name: 'BANK NIFTY' },
     FINNIFTY: { ticker: '^CNXFIN', name: 'FIN NIFTY' },
     SENSEX: { ticker: '^BSESN', name: 'SENSEX' },
+  };
+
+  // Parity Scanner — ticker mapping & chart load handler
+  const PARITY_TICKER_MAP = {
+    NIFTY:      { ticker: '^NSEI',    name: 'NIFTY 50'   },
+    BANKNIFTY:  { ticker: '^NSEBANK', name: 'BANK NIFTY' },
+    FINNIFTY:   { ticker: '^CNXFIN',  name: 'FIN NIFTY'  },
+    MIDCPNIFTY: { ticker: '^CNXMID',  name: 'MIDCAP NIFTY'},
+    SENSEX:     { ticker: '^BSESN',   name: 'SENSEX'     },
+  };
+
+  const handleLoadParityChart = (row) => {
+    const map = PARITY_TICKER_MAP[row.underlying] || { ticker: row.underlying + '.NS', name: row.underlying };
+    const stockObj = { ticker: map.ticker, name: map.name, type: 'INDEX' };
+    setStockData(null);
+    setPivotPoint(null);
+    setGannFan(null);
+    setSignal(null);
+    setSelectedStock(stockObj);
+    const defaultTf = { multiplier: 5, timespan: 'minute', label: '5M' };
+    setTimeframe(defaultTf);
+    fetchStockData(map.ticker, defaultTf);
+    setMobilePanel('chart');
+
+    // Derive Buy/Sell/SL/Target from parity data
+    const spot = row.spot;
+    const sig  = row.parity.signal;
+    const misPct = Math.min(Math.max(Math.abs(row.parity.mispricing_pct || 0) / 100, 0.005), 0.03);
+    const slPct  = misPct * 1.0;
+    const tgtPct = misPct * 2.0;
+
+    if (sig === 'CONVERSION') {
+      setParityTradeSignal({
+        direction: 'SELL',
+        entry:  +spot.toFixed(2),
+        sl:     +(spot * (1 + slPct)).toFixed(2),
+        target: +(spot * (1 - tgtPct)).toFixed(2),
+        symbol: row.underlying, strike: row.strike, expiry: row.expiry,
+      });
+    } else if (sig === 'REVERSE_CONVERSION') {
+      setParityTradeSignal({
+        direction: 'BUY',
+        entry:  +spot.toFixed(2),
+        sl:     +(spot * (1 - slPct)).toFixed(2),
+        target: +(spot * (1 + tgtPct)).toFixed(2),
+        symbol: row.underlying, strike: row.strike, expiry: row.expiry,
+      });
+    } else {
+      setParityTradeSignal(null);
+    }
+    setShowParityScanner(false);
   };
 
   const handleIndexClick = (symbol, name) => {
@@ -764,6 +816,7 @@ const TradingDashboard = () => {
               }}
               activeStrategy={activeStrategy}
               strategyData={strategyData}
+              tradeSignal={parityTradeSignal}
             />
           </div>
           {/* Footprint Panel — below chart, auto-fetches when stock loaded */}
@@ -906,7 +959,10 @@ const TradingDashboard = () => {
 
       {/* Put-Call Parity F&O Scanner */}
       {showParityScanner && (
-        <PutCallParityScanner onClose={() => setShowParityScanner(false)} />
+        <PutCallParityScanner
+          onClose={() => setShowParityScanner(false)}
+          onLoadChart={handleLoadParityChart}
+        />
       )}
 
       {/* Hybrid Super Brain */}
