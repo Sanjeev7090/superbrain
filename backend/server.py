@@ -11753,6 +11753,10 @@ app.include_router(mc_router)
 from options_parity_router import router as options_parity_router
 app.include_router(options_parity_router)
 
+# ======================= DELTADASH SCOREBOARD =======================
+from deltadash_router import router as deltadash_router
+app.include_router(deltadash_router)
+
 # ======================= HYBRID SUPER BRAIN =======================
 from agents.hybrid_brain_router import router as hybrid_brain_router
 app.include_router(hybrid_brain_router)

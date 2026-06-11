@@ -50,6 +50,7 @@ import GrowwPortfolio from './GrowwPortfolio';
 import IndicesTickerBar from './IndicesTickerBar';
 import TopOptionsSheet from './TopOptionsSheet';
 import PutCallParityScanner from './PutCallParityScanner';
+import DeltaDashScoreboard from './DeltaDashScoreboard';
 import HybridBrainPanel from './HybridBrainPanel';
 import PaperTradingPanel from './PaperTradingPanel';
 import SectorTrending from './SectorTrending';
@@ -127,6 +128,7 @@ const TradingDashboard = () => {
   const [showVisualize, setShowVisualize] = useState(false); // Heatmaps/Network modal
   const [show3D, setShow3D] = useState(false); // 3D Gann chart
   const [showParityScanner, setShowParityScanner] = useState(false); // Put-Call Parity F&O Scanner
+  const [showDeltaDash, setShowDeltaDash] = useState(false); // DeltaDash Scoreboard
   const [parityTradeSignal, setParityTradeSignal] = useState(null); // Trade signal from Parity Scanner
   const [showHybridBrain, setShowHybridBrain] = useState(false); // Hybrid Super Brain
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
@@ -670,6 +672,16 @@ const TradingDashboard = () => {
             <span className="text-sm">⚡</span>
             <span className="hidden sm:inline">PARITY</span>
           </button>
+          {/* DELTADASH SCOREBOARD BUTTON */}
+          <button
+            onClick={() => setShowDeltaDash(true)}
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-indigo-500/50 text-indigo-400 hover:bg-indigo-500/20 hover:border-indigo-400 px-2.5 py-1.5 rounded transition-all"
+            data-testid="deltadash-btn"
+            title="DeltaDash Multi-Timeframe Analysis Scoreboard"
+          >
+            <span className="text-[10px] font-black">dd</span>
+            <span className="hidden sm:inline">DELTA</span>
+          </button>
           {/* DREAMER V3 ROBO-TRADER BUTTON */}
           <button
             onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
@@ -962,6 +974,17 @@ const TradingDashboard = () => {
         <PutCallParityScanner
           onClose={() => setShowParityScanner(false)}
           onLoadChart={handleLoadParityChart}
+        />
+      )}
+
+      {/* DeltaDash Scoreboard */}
+      {showDeltaDash && (
+        <DeltaDashScoreboard
+          onClose={() => setShowDeltaDash(false)}
+          onSelectStock={(stock) => {
+            handleStockSelect(stock);
+            setShowDeltaDash(false);
+          }}
         />
       )}
 
