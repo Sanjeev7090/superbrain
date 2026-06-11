@@ -11753,6 +11753,10 @@ app.include_router(mc_router)
 from options_parity_router import router as options_parity_router
 app.include_router(options_parity_router)
 
+# ======================= HYBRID SUPER BRAIN =======================
+from agents.hybrid_brain_router import router as hybrid_brain_router
+app.include_router(hybrid_brain_router)
+
 from ai_router.router import ai_router as _ai_router
 app.include_router(_ai_router)
 

@@ -50,6 +50,7 @@ import GrowwPortfolio from './GrowwPortfolio';
 import IndicesTickerBar from './IndicesTickerBar';
 import TopOptionsSheet from './TopOptionsSheet';
 import PutCallParityScanner from './PutCallParityScanner';
+import HybridBrainPanel from './HybridBrainPanel';
 import PaperTradingPanel from './PaperTradingPanel';
 import SectorTrending from './SectorTrending';
 import SectorStocksSheet from './SectorStocksSheet';
@@ -126,6 +127,7 @@ const TradingDashboard = () => {
   const [showVisualize, setShowVisualize] = useState(false); // Heatmaps/Network modal
   const [show3D, setShow3D] = useState(false); // 3D Gann chart
   const [showParityScanner, setShowParityScanner] = useState(false); // Put-Call Parity F&O Scanner
+  const [showHybridBrain, setShowHybridBrain] = useState(false); // Hybrid Super Brain
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const { theme, toggleTheme } = useTheme();
   const wsRef = useRef(null);
@@ -616,6 +618,16 @@ const TradingDashboard = () => {
             <span className="text-sm">⚡</span>
             <span className="hidden sm:inline">PARITY</span>
           </button>
+          {/* HYBRID SUPER BRAIN BUTTON */}
+          <button
+            onClick={() => setShowHybridBrain(true)}
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-fuchsia-500/50 text-fuchsia-400 hover:bg-fuchsia-500/20 hover:border-fuchsia-500 px-2.5 py-1.5 rounded"
+            data-testid="hybrid-brain-btn"
+            title="Hybrid Super Brain — Dreamer + Psychology + Survival"
+          >
+            <span className="text-sm">🧠</span>
+            <span className="hidden sm:inline">BRAIN</span>
+          </button>
           {/* DREAMER V3 ROBO-TRADER BUTTON */}
           <button
             onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
@@ -905,6 +917,11 @@ const TradingDashboard = () => {
       {/* Put-Call Parity F&O Scanner */}
       {showParityScanner && (
         <PutCallParityScanner onClose={() => setShowParityScanner(false)} />
+      )}
+
+      {/* Hybrid Super Brain */}
+      {showHybridBrain && (
+        <HybridBrainPanel onClose={() => setShowHybridBrain(false)} />
       )}
 
       {/* Voice Command System */}
