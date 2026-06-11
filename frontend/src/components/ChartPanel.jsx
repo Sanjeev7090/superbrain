@@ -25,47 +25,54 @@ const fmtVol = n => {
 // ── SMC Auto Mark: compute FVG / Liquidity / Order Blocks ─────────
 function computeSMCData(bars) {
   const n = bars.length;
-  if (n < 15) return { fvgs: [], swings: [], obs: [] };
+  const empty = { fvgs: [], swings: [], obs: [], bosChoch: [], pdZone: null,
+    supplyZones: [], demandZones: [], wyckoffPhases: [], manipulations: [], refinedEntries: [] };
+  if (n < 15) return empty;
 
+  // ── ATR-14 (needed for all pattern strength checks) ───────────
+  const atrArr = [];
+  for (let i = 1; i < n; i++) {
+    atrArr.push(Math.max(
+      bars[i].high - bars[i].low,
+      Math.abs(bars[i].high - bars[i - 1].close),
+      Math.abs(bars[i].low  - bars[i - 1].close)
+    ));
+  }
+  const atr14 = atrArr.length >= 14
+    ? atrArr.slice(-14).reduce((a, b) => a + b, 0) / 14
+    : (atrArr.reduce((a, b) => a + b, 0) / (atrArr.length || 1));
+
+  // ── FVG detection ─────────────────────────────────────────────
   const fvgs = [];
   const obs  = [];
-
   for (let i = 2; i < n; i++) {
-    // Bullish FVG: low[i] > high[i-2]
     if (bars[i].low > bars[i - 2].high) {
       const endIdx = Math.min(i + 20, n - 1);
-      let mitigated = false;
+      let mit = false;
       for (let j = i + 1; j <= endIdx; j++) {
-        if (bars[j].low < bars[i].low && bars[j].high > bars[i - 2].high) { mitigated = true; break; }
+        if (bars[j].low < bars[i].low && bars[j].high > bars[i - 2].high) { mit = true; break; }
       }
-      fvgs.push({
-        type: 'bull', top: bars[i].low, bottom: bars[i - 2].high, mitigated,
-        startTime: bars[i - 1].timestamp / 1000,
-        endTime: bars[endIdx].timestamp / 1000,
-      });
+      fvgs.push({ type: 'bull', top: bars[i].low, bottom: bars[i - 2].high, mitigated: mit,
+        startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
       if (bars[i].close > bars[i].open)
         obs.push({ type: 'bull', high: bars[i - 1].high, low: bars[i - 1].low,
           startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
     }
-    // Bearish FVG: high[i] < low[i-2]
     if (bars[i].high < bars[i - 2].low) {
       const endIdx = Math.min(i + 20, n - 1);
-      let mitigated = false;
+      let mit = false;
       for (let j = i + 1; j <= endIdx; j++) {
-        if (bars[j].high > bars[i].high && bars[j].low < bars[i - 2].low) { mitigated = true; break; }
+        if (bars[j].high > bars[i].high && bars[j].low < bars[i - 2].low) { mit = true; break; }
       }
-      fvgs.push({
-        type: 'bear', top: bars[i - 2].low, bottom: bars[i].high, mitigated,
-        startTime: bars[i - 1].timestamp / 1000,
-        endTime: bars[endIdx].timestamp / 1000,
-      });
+      fvgs.push({ type: 'bear', top: bars[i - 2].low, bottom: bars[i].high, mitigated: mit,
+        startTime: bars[i - 1].timestamp / 1000, endTime: bars[endIdx].timestamp / 1000 });
       if (bars[i].close < bars[i].open)
         obs.push({ type: 'bear', high: bars[i - 1].high, low: bars[i - 1].low,
           startTime: bars[i - 1].timestamp / 1000, endTime: bars[i].timestamp / 1000 });
     }
   }
 
-  // Swing high / low — pivot 5,5
+  // ── Swing H/L — pivot 5,5 ─────────────────────────────────────
   const swings = [];
   for (let i = 5; i < n - 5; i++) {
     let isH = true, isL = true;
@@ -75,79 +82,207 @@ function computeSMCData(bars) {
       if (bars[j].low  <= bars[i].low)  isL = false;
     }
     const eIdx = Math.min(i + 50, n - 1);
-    if (isH) swings.push({ type: 'high', price: bars[i].high, startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000 });
-    if (isL) swings.push({ type: 'low',  price: bars[i].low,  startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000 });
+    if (isH) swings.push({ type: 'high', price: bars[i].high,
+      startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000, barIdx: i });
+    if (isL) swings.push({ type: 'low',  price: bars[i].low,
+      startTime: bars[i].timestamp / 1000, endTime: bars[eIdx].timestamp / 1000, barIdx: i });
   }
 
-  // ── BOS / CHoCH detection ─────────────────────────────────────
-  // Build time-sorted swing list with bar indices
+  // ── BOS / CHoCH ───────────────────────────────────────────────
   const sortedSwings = swings.slice().sort((a, b) => a.startTime - b.startTime);
   const bosChoch = [];
-
   if (sortedSwings.length >= 3) {
-    let trend = null; // 'up' | 'down'
-
-    // Seed trend from first two distinct highs vs lows
-    const firstHighs = sortedSwings.filter(s => s.type === 'high');
-    const firstLows  = sortedSwings.filter(s => s.type === 'low');
-    if (firstHighs.length >= 2)
-      trend = firstHighs[1].price > firstHighs[0].price ? 'up' : 'down';
-
+    let trend = null;
+    const fHigh = sortedSwings.filter(s => s.type === 'high');
+    if (fHigh.length >= 2) trend = fHigh[1].price > fHigh[0].price ? 'up' : 'down';
     for (let i = 1; i < sortedSwings.length; i++) {
       const curr = sortedSwings[i];
-
       if (curr.type === 'high') {
-        // Find the most recent previous high
         const ph = sortedSwings.slice(0, i).filter(s => s.type === 'high');
         if (!ph.length) continue;
         const prev = ph[ph.length - 1];
         if (curr.price > prev.price) {
-          if (trend === 'up') {
-            bosChoch.push({ kind: 'bos_bull', price: prev.price, eventTime: curr.startTime });
-          } else if (trend === 'down') {
-            bosChoch.push({ kind: 'choch_bull', price: prev.price, eventTime: curr.startTime });
-            trend = 'up';
-          } else {
-            trend = 'up';
-          }
+          bosChoch.push({ kind: trend === 'up' ? 'bos_bull' : 'choch_bull', price: prev.price, eventTime: curr.startTime });
+          if (trend !== 'up') trend = 'up';
         }
       } else {
-        // curr.type === 'low'
         const pl = sortedSwings.slice(0, i).filter(s => s.type === 'low');
         if (!pl.length) continue;
         const prev = pl[pl.length - 1];
         if (curr.price < prev.price) {
-          if (trend === 'down') {
-            bosChoch.push({ kind: 'bos_bear', price: prev.price, eventTime: curr.startTime });
-          } else if (trend === 'up') {
-            bosChoch.push({ kind: 'choch_bear', price: prev.price, eventTime: curr.startTime });
-            trend = 'down';
-          } else {
-            trend = 'down';
-          }
+          bosChoch.push({ kind: trend === 'down' ? 'bos_bear' : 'choch_bear', price: prev.price, eventTime: curr.startTime });
+          if (trend !== 'down') trend = 'down';
         }
       }
     }
   }
 
+  // ── Premium / Discount zone ───────────────────────────────────
+  const pdZone = (() => {
+    const recentH = [...swings].reverse().find(s => s.type === 'high');
+    const recentL = [...swings].reverse().find(s => s.type === 'low');
+    if (!recentH || !recentL) return null;
+    const hi = recentH.price, lo = recentL.price;
+    if (hi <= lo) return null;
+    return { hi, lo, eq: (hi + lo) / 2,
+      startTime: Math.min(recentH.startTime, recentL.startTime),
+      endTime:   Math.max(recentH.endTime,   recentL.endTime) };
+  })();
+
+  // ── Supply & Demand Zones (Drop-Base-Rally / Rally-Base-Drop) ──
+  const supplyZones = [], demandZones = [];
+  for (let i = 3; i < n - 1; i++) {
+    const bar      = bars[i];
+    const bodySize = Math.abs(bar.close - bar.open);
+    if (bodySize < atr14 * 1.0) continue; // filter weak candles
+
+    const baseStart = Math.max(0, i - 5);
+    const baseBars  = bars.slice(baseStart, i);
+    if (baseBars.length < 1) continue;
+
+    const baseHigh  = Math.max(...baseBars.map(b => b.high));
+    const baseLow   = Math.min(...baseBars.map(b => b.low));
+    const baseRange = baseHigh - baseLow;
+    if (baseRange > bodySize * 1.0) continue; // must be tight base
+
+    const endTime = bars[n - 1].timestamp / 1000;
+    const startTime = baseBars[0].timestamp / 1000;
+
+    if (bar.close > bar.open) { // Bullish impulse → Demand Zone
+      let mit = false;
+      for (let j = i + 1; j < n; j++) { if (bars[j].low < baseLow) { mit = true; break; } }
+      if (!mit) demandZones.push({ top: baseHigh, bottom: baseLow, startTime, endTime,
+        strength: Math.min(3, bodySize / atr14) });
+    } else { // Bearish impulse → Supply Zone
+      let mit = false;
+      for (let j = i + 1; j < n; j++) { if (bars[j].high > baseHigh) { mit = true; break; } }
+      if (!mit) supplyZones.push({ top: baseHigh, bottom: baseLow, startTime, endTime,
+        strength: Math.min(3, bodySize / atr14) });
+    }
+  }
+
+  // ── Wyckoff: Accumulation & Distribution ─────────────────────
+  const wyckoffPhases = [];
+  const winSize = Math.max(12, Math.min(20, Math.floor(n / 5)));
+  for (let s = 5; s < n - winSize; s += Math.max(3, Math.floor(winSize / 3))) {
+    const e    = Math.min(s + winSize, n - 1);
+    const win  = bars.slice(s, e + 1);
+    const wHi  = Math.max(...win.map(b => b.high));
+    const wLo  = Math.min(...win.map(b => b.low));
+    const wRng = wHi - wLo;
+    const avgR = win.reduce((acc, b) => acc + (b.high - b.low), 0) / win.length;
+    if (wRng > avgR * 7) continue; // not a tight range
+
+    const priorBars = bars.slice(Math.max(0, s - winSize), s);
+    if (priorBars.length < 4) continue;
+    const priorMove = priorBars[priorBars.length - 1].close - priorBars[0].close;
+
+    const afterBars = bars.slice(e + 1, Math.min(n, e + winSize));
+    const afterMove = afterBars.length > 2
+      ? afterBars[afterBars.length - 1].close - afterBars[0].close : 0;
+
+    const phase =
+      priorMove < -atr14 * 3 && (afterMove > atr14 * 2 || e >= n - 6) ? 'ACC' :
+      priorMove >  atr14 * 3 && (afterMove < -atr14 * 2 || e >= n - 6) ? 'DIST' : null;
+
+    if (phase) wyckoffPhases.push({ phase, top: wHi, bottom: wLo,
+      startTime: win[0].timestamp / 1000, endTime: win[win.length - 1].timestamp / 1000,
+      active: e >= n - 8 });
+  }
+  // Deduplicate
+  const dedupedWy = wyckoffPhases.filter((p, i) =>
+    !wyckoffPhases.some((q, j) => j < i && p.phase === q.phase &&
+      Math.abs(p.bottom - q.bottom) < (p.top - p.bottom) * 0.6)
+  ).slice(-4);
+
+  // ── Manipulation / Stop Hunt Detection ───────────────────────
+  const manipulations = [];
+  const swingLows   = swings.filter(s => s.type === 'low');
+  const swingHighs  = swings.filter(s => s.type === 'high');
+
+  const nearestBarIdx = (targetTime) => {
+    let best = -1, bestD = Infinity;
+    bars.forEach((b, i) => {
+      const d = Math.abs(b.timestamp / 1000 - targetTime);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    return bestD < 7200 ? best : -1; // within 2h
+  };
+
+  // Bullish hunt: sweep of swing low with close above
+  swingLows.slice(-10).forEach(sw => {
+    const swIdx = sw.barIdx ?? nearestBarIdx(sw.startTime);
+    if (swIdx < 0) return;
+    for (let i = swIdx + 1; i < Math.min(swIdx + 20, n); i++) {
+      if (bars[i].low < sw.price) {
+        if (bars[i].close > sw.price) {
+          const nextClose = bars[Math.min(i + 1, n - 1)].close;
+          const nearTgt   = swingHighs.length
+            ? Math.max(...swingHighs.slice(-3).map(s => s.price)) : bars[i].close * 1.015;
+          manipulations.push({ type: 'bull_hunt', sweepLevel: sw.price,
+            wickExtreme: bars[i].low, closeLevel: bars[i].close,
+            sl: bars[i].low, entryPrice: nextClose, targetPrice: nearTgt,
+            eventTime: bars[i].timestamp / 1000 });
+        }
+        break;
+      }
+    }
+  });
+
+  // Bearish hunt: sweep of swing high with close below
+  swingHighs.slice(-10).forEach(sw => {
+    const swIdx = sw.barIdx ?? nearestBarIdx(sw.startTime);
+    if (swIdx < 0) return;
+    for (let i = swIdx + 1; i < Math.min(swIdx + 20, n); i++) {
+      if (bars[i].high > sw.price) {
+        if (bars[i].close < sw.price) {
+          const nearTgt = swingLows.length
+            ? Math.min(...swingLows.slice(-3).map(s => s.price)) : bars[i].close * 0.985;
+          manipulations.push({ type: 'bear_hunt', sweepLevel: sw.price,
+            wickExtreme: bars[i].high, closeLevel: bars[i].close,
+            sl: bars[i].high, entryPrice: bars[Math.min(i + 1, n - 1)].close,
+            targetPrice: nearTgt, eventTime: bars[i].timestamp / 1000 });
+        }
+        break;
+      }
+    }
+  });
+
+  // ── Refined Entry Zones (from CHoCH + nearest OB) ────────────
+  const refinedEntries = [];
+  (bosChoch || []).filter(ev => ev.kind.includes('choch')).slice(-3).forEach(ev => {
+    const isBull = ev.kind.includes('bull');
+    const relOBs = obs.filter(ob => ob.type === (isBull ? 'bull' : 'bear'));
+    const nearOB = relOBs[relOBs.length - 1];
+    const entryHigh = nearOB ? nearOB.high : ev.price * 1.001;
+    const entryLow  = nearOB ? nearOB.low  : ev.price * 0.999;
+    const relSwings = isBull
+      ? swingLows.filter(s => s.startTime < ev.eventTime)
+      : swingHighs.filter(s => s.startTime < ev.eventTime);
+    const lastSw = relSwings[relSwings.length - 1];
+    const slLevel = lastSw
+      ? (isBull ? lastSw.price * 0.9985 : lastSw.price * 1.0015)
+      : (isBull ? ev.price * 0.990 : ev.price * 1.010);
+    const tgtSwings = isBull
+      ? swingHighs.filter(s => s.price > entryHigh)
+      : swingLows.filter(s => s.price < entryLow);
+    refinedEntries.push({ direction: isBull ? 'bull' : 'bear',
+      entryHigh, entryLow, slLevel,
+      target: tgtSwings[0]?.price ?? null,
+      eventTime: ev.eventTime, level: ev.price });
+  });
+
   return {
-    fvgs:     fvgs.filter(f => !f.mitigated).slice(-40),
-    swings:   swings.slice(-40),
-    obs:      obs.slice(-20),
-    bosChoch: bosChoch.slice(-20),
-    pdZone:   (() => {
-      // Premium / Discount zone — from last confirmed swing high + low
-      const recentH = [...swings].reverse().find(s => s.type === 'high');
-      const recentL = [...swings].reverse().find(s => s.type === 'low');
-      if (!recentH || !recentL) return null;
-      const hi = recentH.price, lo = recentL.price;
-      if (hi <= lo) return null;
-      return {
-        hi, lo, eq: (hi + lo) / 2,
-        startTime: Math.min(recentH.startTime, recentL.startTime),
-        endTime:   Math.max(recentH.endTime,   recentL.endTime),
-      };
-    })(),
+    fvgs:           fvgs.filter(f => !f.mitigated).slice(-40),
+    swings:         swings.slice(-40),
+    obs:            obs.slice(-20),
+    bosChoch:       bosChoch.slice(-20),
+    pdZone,
+    supplyZones:    supplyZones.slice(-6),
+    demandZones:    demandZones.slice(-6),
+    wyckoffPhases:  dedupedWy,
+    manipulations:  manipulations.slice(-6),
+    refinedEntries: refinedEntries.slice(-3),
   };
 }
 
@@ -422,6 +557,85 @@ const ChartPanel = ({
     const toX = t  => { try { return ts.timeToCoordinate(t); } catch { return null; } };
     const toY = p  => series.priceToCoordinate(p);
 
+    // ── 0a. Wyckoff Phases (ACC / DIST) — deepest background ──────
+    (smc.wyckoffPhases || []).forEach(phase => {
+      const x1  = toX(phase.startTime);
+      const x2  = toX(phase.endTime);
+      const yT  = toY(phase.top);
+      const yB  = toY(phase.bottom);
+      if (x1 == null || x2 == null || yT == null || yB == null) return;
+      const left = Math.min(x1, x2);
+      const top  = Math.min(yT, yB);
+      const w    = Math.max(20, Math.abs(x2 - x1));
+      const h    = Math.max(4, Math.abs(yT - yB));
+      const isAcc = phase.phase === 'ACC';
+      ctx.save();
+      ctx.fillStyle   = isAcc ? 'rgba(0,150,255,0.06)'   : 'rgba(200,50,200,0.06)';
+      ctx.strokeStyle = isAcc ? 'rgba(0,150,255,0.55)'   : 'rgba(200,50,200,0.55)';
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([5, 4]);
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeRect(left, top, w, h);
+      ctx.setLineDash([]);
+      ctx.fillStyle = isAcc ? 'rgba(0,190,255,0.90)' : 'rgba(220,100,220,0.90)';
+      ctx.font = 'bold 9px monospace';
+      ctx.fillText(isAcc ? '▲ ACCUM' : '▼ DIST', left + 4, top + 12);
+      if (phase.active) {
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText('ACTIVE', left + 4, top + 23);
+      }
+      ctx.restore();
+    });
+
+    // ── 0b. Demand Zones (Support — green hatched boxes) ──────────
+    (smc.demandZones || []).forEach(zone => {
+      const x1 = toX(zone.startTime); const x2 = toX(zone.endTime);
+      const yT = toY(zone.top);       const yB = toY(zone.bottom);
+      if (x1 == null || yT == null || yB == null) return;
+      const left = Math.min(x1 ?? 0, x2 ?? W);
+      const top  = Math.min(yT, yB);
+      const w    = x2 != null ? Math.abs(x2 - x1) : W - left;
+      const h    = Math.max(3, Math.abs(yT - yB));
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,230,118,0.08)';
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeStyle = 'rgba(0,230,118,0.75)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(left, top);     ctx.lineTo(left + w, top);     ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, top + h); ctx.lineTo(left + w, top + h); ctx.stroke();
+      // diagonal hatch
+      ctx.strokeStyle = 'rgba(0,230,118,0.15)'; ctx.lineWidth = 0.7;
+      for (let hx = left - h; hx < left + w; hx += 7) {
+        ctx.beginPath(); ctx.moveTo(hx, top + h); ctx.lineTo(hx + h, top); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(0,230,118,0.95)'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(zone.strength >= 2 ? '★ DZ' : 'DZ', left + 3, top + h - 3);
+      ctx.restore();
+    });
+
+    // ── 0c. Supply Zones (Resistance — red hatched boxes) ─────────
+    (smc.supplyZones || []).forEach(zone => {
+      const x1 = toX(zone.startTime); const x2 = toX(zone.endTime);
+      const yT = toY(zone.top);       const yB = toY(zone.bottom);
+      if (x1 == null || yT == null || yB == null) return;
+      const left = Math.min(x1 ?? 0, x2 ?? W);
+      const top  = Math.min(yT, yB);
+      const w    = x2 != null ? Math.abs(x2 - x1) : W - left;
+      const h    = Math.max(3, Math.abs(yT - yB));
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,59,48,0.08)';
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeStyle = 'rgba(255,80,50,0.75)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(left, top);     ctx.lineTo(left + w, top);     ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(left, top + h); ctx.lineTo(left + w, top + h); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,80,50,0.15)'; ctx.lineWidth = 0.7;
+      for (let hx = left - h; hx < left + w; hx += 7) {
+        ctx.beginPath(); ctx.moveTo(hx, top); ctx.lineTo(hx + h, top + h); ctx.stroke();
+      }
+      ctx.fillStyle = 'rgba(255,100,50,0.95)'; ctx.font = 'bold 8px monospace';
+      ctx.fillText(zone.strength >= 2 ? '★ SZ' : 'SZ', left + 3, top + 9);
+      ctx.restore();
+    });
+
     // ── 1. Liquidity lines (Swing High / Low) ─────────────────
     smc.swings.forEach(sw => {
       const x1 = toX(sw.startTime);
@@ -607,6 +821,107 @@ const ChartPanel = ({
         ctx.restore();
       }
     }
+
+    // ── 6. Manipulation / Stop Hunt markers ──────────────────────
+    (smc.manipulations || []).forEach(hunt => {
+      const xEv   = toX(hunt.eventTime);
+      const yWick = toY(hunt.wickExtreme);
+      const ySwp  = toY(hunt.sweepLevel);
+      const yCls  = toY(hunt.closeLevel);
+      if (xEv == null || yWick == null) return;
+      const isBull = hunt.type === 'bull_hunt';
+      ctx.save();
+
+      // Vertical strike line through the manipulation candle
+      ctx.strokeStyle = 'rgba(255,140,0,0.85)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(xEv, Math.min(yWick, yCls ?? yWick));
+      ctx.lineTo(xEv, Math.max(yWick, yCls ?? yWick));
+      ctx.stroke();
+
+      // Wick dot (where SL sits)
+      ctx.fillStyle = '#FF3B30';
+      ctx.beginPath(); ctx.arc(xEv, yWick, 4, 0, Math.PI * 2); ctx.fill();
+
+      // Sweep level dashed line
+      if (ySwp != null) {
+        ctx.strokeStyle = 'rgba(255,140,0,0.45)';
+        ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+        ctx.beginPath(); ctx.moveTo(xEv - 25, ySwp); ctx.lineTo(xEv + 25, ySwp); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Label pill
+      ctx.font = 'bold 8px monospace';
+      const lbl = isBull ? 'HUNT↓' : 'HUNT↑';
+      const tw  = ctx.measureText(lbl).width + 8;
+      const ly  = isBull ? yWick + 5 : yWick - 18;
+      ctx.fillStyle = 'rgba(255,140,0,0.22)';
+      ctx.fillRect(xEv - tw / 2, ly, tw, 13);
+      ctx.fillStyle = '#FFA500';
+      ctx.fillText(lbl, xEv - tw / 2 + 4, ly + 9);
+
+      // SL label
+      if (ySwp != null) {
+        ctx.fillStyle = 'rgba(255,59,48,0.85)';
+        ctx.font = '7px monospace';
+        ctx.fillText('SL', xEv + 6, yWick + (isBull ? -2 : 4));
+      }
+      ctx.restore();
+    });
+
+    // ── 7. Refined Entry Zones (CHoCH-based) ─────────────────────
+    (smc.refinedEntries || []).forEach(entry => {
+      const yEH  = toY(entry.entryHigh);
+      const yEL  = toY(entry.entryLow);
+      const ySL  = toY(entry.slLevel);
+      const yTgt = entry.target ? toY(entry.target) : null;
+      const xEv  = toX(entry.eventTime);
+      if (yEH == null || yEL == null || ySL == null) return;
+      const isBull   = entry.direction === 'bull';
+      const eClr     = isBull ? '#00E676' : '#FF3B30';
+      const xLeft    = xEv != null ? xEv : 0;
+      const xRight   = W - 6;
+      ctx.save();
+
+      // Entry zone shaded box
+      const ezTop = Math.min(yEH, yEL);
+      const ezH   = Math.max(2, Math.abs(yEH - yEL));
+      ctx.fillStyle = isBull ? 'rgba(0,230,118,0.14)' : 'rgba(255,59,48,0.14)';
+      ctx.fillRect(xLeft, ezTop, xRight - xLeft, ezH);
+      ctx.strokeStyle = eClr; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+      ctx.beginPath(); ctx.moveTo(xLeft, ezTop);      ctx.lineTo(xRight, ezTop);      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xLeft, ezTop + ezH); ctx.lineTo(xRight, ezTop + ezH); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = eClr; ctx.font = 'bold 8px monospace';
+      ctx.fillText(isBull ? '▲ ENTRY' : '▼ ENTRY', xRight - 52, ezTop - 3);
+
+      // SL line
+      ctx.strokeStyle = '#FF3B30'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(xLeft, ySL); ctx.lineTo(xRight, ySL); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#FF3B30'; ctx.font = 'bold 7px monospace';
+      ctx.fillText('SL', xRight - 14, ySL - 2);
+
+      // Target line
+      if (yTgt != null) {
+        ctx.strokeStyle = eClr; ctx.lineWidth = 1; ctx.setLineDash([6, 3]);
+        ctx.beginPath(); ctx.moveTo(xLeft, yTgt); ctx.lineTo(xRight, yTgt); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = eClr; ctx.font = 'bold 7px monospace';
+        ctx.fillText('TGT', xRight - 20, yTgt - 2);
+
+        // R:R ratio
+        const risk   = Math.abs(ySL - (yEH + yEL) / 2);
+        const reward = Math.abs(yTgt - (yEH + yEL) / 2);
+        const rr     = risk > 0 ? (reward / risk).toFixed(1) : '?';
+        ctx.fillStyle = 'rgba(255,255,255,0.65)';
+        ctx.font = 'bold 7px monospace';
+        ctx.fillText(`R:R ${rr}x`, xLeft + 4, (yEH + yEL) / 2 + 4);
+      }
+      ctx.restore();
+    });
 
     ctx.restore();
   // eslint-disable-next-line react-hooks/exhaustive-deps
