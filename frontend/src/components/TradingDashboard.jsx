@@ -49,6 +49,7 @@ import AIRouterPanel from './AIRouterPanel';
 import GrowwPortfolio from './GrowwPortfolio';
 import IndicesTickerBar from './IndicesTickerBar';
 import TopOptionsSheet from './TopOptionsSheet';
+import PutCallParityScanner from './PutCallParityScanner';
 import PaperTradingPanel from './PaperTradingPanel';
 import SectorTrending from './SectorTrending';
 import SectorStocksSheet from './SectorStocksSheet';
@@ -124,6 +125,7 @@ const TradingDashboard = () => {
   const [sectorSheet, setSectorSheet] = useState(null); // sector obj for stocks sheet
   const [showVisualize, setShowVisualize] = useState(false); // Heatmaps/Network modal
   const [show3D, setShow3D] = useState(false); // 3D Gann chart
+  const [showParityScanner, setShowParityScanner] = useState(false); // Put-Call Parity F&O Scanner
   const [rlStatus, setRlStatus] = useState(null); // RL Agent background status
   const { theme, toggleTheme } = useTheme();
   const wsRef = useRef(null);
@@ -604,6 +606,16 @@ const TradingDashboard = () => {
           >
             <span className="text-[10px]">3D</span>
           </button>
+          {/* PUT-CALL PARITY F&O SCANNER BUTTON */}
+          <button
+            onClick={() => setShowParityScanner(true)}
+            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/20 hover:border-yellow-500 px-2.5 py-1.5 rounded"
+            data-testid="parity-scanner-btn"
+            title="One-Click Put-Call Parity F&O Scanner — finds best arbitrage live"
+          >
+            <span className="text-sm">⚡</span>
+            <span className="hidden sm:inline">PARITY</span>
+          </button>
           {/* DREAMER V3 ROBO-TRADER BUTTON */}
           <button
             onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
@@ -888,6 +900,11 @@ const TradingDashboard = () => {
           stockData={stockData}
           selectedStock={selectedStock}
         />
+      )}
+
+      {/* Put-Call Parity F&O Scanner */}
+      {showParityScanner && (
+        <PutCallParityScanner onClose={() => setShowParityScanner(false)} />
       )}
 
       {/* Voice Command System */}

@@ -11749,6 +11749,10 @@ app.include_router(pece_router)
 from moneycontrol.router import router as mc_router
 app.include_router(mc_router)
 
+# ======================= PUT-CALL PARITY (F&O Scanner) =======================
+from options_parity_router import router as options_parity_router
+app.include_router(options_parity_router)
+
 from ai_router.router import ai_router as _ai_router
 app.include_router(_ai_router)
 
