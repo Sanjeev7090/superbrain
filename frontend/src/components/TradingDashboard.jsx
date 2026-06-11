@@ -618,16 +618,6 @@ const TradingDashboard = () => {
             <span className="text-sm">⚡</span>
             <span className="hidden sm:inline">PARITY</span>
           </button>
-          {/* HYBRID SUPER BRAIN BUTTON */}
-          <button
-            onClick={() => setShowHybridBrain(true)}
-            className="liquid-glass-btn flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest border border-fuchsia-500/50 text-fuchsia-400 hover:bg-fuchsia-500/20 hover:border-fuchsia-500 px-2.5 py-1.5 rounded"
-            data-testid="hybrid-brain-btn"
-            title="Hybrid Super Brain — Dreamer + Psychology + Survival"
-          >
-            <span className="text-sm">🧠</span>
-            <span className="hidden sm:inline">BRAIN</span>
-          </button>
           {/* DREAMER V3 ROBO-TRADER BUTTON */}
           <button
             onClick={() => { setActiveTab('robo'); setMobilePanel('right'); }}
