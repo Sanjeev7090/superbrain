@@ -1,114 +1,112 @@
-<analysis><original_problem_statement>
-Clone the repository  100% same to same. PRODUCT REQUIREMENTS: Upgrade the existing FastAPI + React repository into a World Top 1% Institutional-Grade Fully Autonomous Robo-Trader.
-</original_problem_statement>
+<analysis>**original_problem_statement:** 
+Clone the GitHub repo  to make it 100% identically synced. Then, fix initial startup/runtime errors, add an F&O Put-Call Parity Scanner feature, and implement a Hybrid Super Brain (psychology & survival metrics engine) deeply integrated into the existing Robot 3.O decision orchestrator.
 
-**User's preferred language**: Hindi (Roman Script / Hinglish). You MUST automatically detect the user's primary language from their messages and INSTRUCT next agent to respond in the user's preferred language only.
+**User's preferred language:** **Hinglish** (Hindi + English mix). INSTRUCT next agent: You MUST respond and converse with the user in Hinglish (e.g., Main check kar leta hoon, Code update ho gaya hai).
 
 **what currently exists?** 
-A full-stack (FastAPI, React, MongoDB) algorithmic trading dashboard (Gann Angles Trader API / Robot 3.O). It features live tracking, options chain fetching, paper/live autonomous trading, RL agent training, persistent history, multi-stock parallel trading (watchlist), and a new Auto-Discover module for scanning high-momentum stocks.
+A Full-stack trading application (FastAPI backend, React frontend, MongoDB). The repository is freshly cloned and synced. It features a trading dashboard with real-time F&O Put-Call parity scanning and a Robot 3.O automated trading brain (DreamerV3) that has been recently fused with a new Hybrid Super Brain (adding psychological FOMO/Apathy scoring and survival-based position sizing/circuit breakers).
 
-**Last working item**:
-- **Last item agent was working**: Implementing the Auto-Discover feature. The user requested an enhancement to auto-discover high momentum stocks to add to the watchlist. The agent created the  endpoint in  and the corresponding UI in . 
-- **Status**: TESTING PENDING (Code is written and manually smoke-tested, but the  hit a SIGTERM/container termination before it could run pytest and frontend tests).
-- **Agent Testing Done**: Y (Manual curl & screenshot smoke test done, but automated suite got interrupted).
-- **Which testing method agent to use?**: testing_agent_v4_fork (To properly validate the newly added Auto-Discover feature and ensure no regressions).
-- **User Testing Done**: N
+**Last working item:**
+- Last item agent was working: Fusing the new  inside the  orchestrator (). The integration now evaluates DreamerV3's output alongside market psychology and survival metrics to generate a final fused trading decision (with size scaling and circuit breakers).
+- Status: USER VERIFICATION PENDING
+- Agent Testing Done: Y
+- Which testing method agent to use? python -c / bash script execution (backend logic testing). 
+- User Testing Done: N
 
-**All Pending/In progress Issue list**:
-*None.*
+**All Pending/In progress Issue list:** 
+*(None currently active. User is deciding the next path.)*
 
-**In progress Task List**:
-Task 1: Auto-Discover Feature Validation & Finalization (P0)
+**In progress Task List:**
+*(None explicitly in progress, waiting on user reply for next step)*
 
-Task Detail:
-- Task 1:
-    - Where to resume: Run  to fully validate the backend logic and frontend UI for the Auto-Discover feature. After passing, update  and use the  tool.
-    - What will be achieved with this?: Guaranteed stability for the new auto-discover momentum scanner without breaking existing robo router endpoints.
-    - Status: TESTING PENDING
-    - Should Test frontend/backend/both after fix?: Both
-    - Blocked on something: Nothing.
+**Upcoming and Future Tasks:**
+  - Task 1 (P1): Visualize the  object block inside the existing  UI (so users can see the brain's reasoning in the main Robot 3.O screen).
+  - Task 2 (P2): Run/test Auto-mode to evaluate live brain decisions natively.
+  - Task 3 (P2): Mix Hybrid Brain audit history into Robot 3.O's  endpoint.
 
-**Upcoming and Future Tasks**:
-- Test Live mode entries threshold check (currently set to 50% in ). (P1)
-- Update frontend UI to show the 5x Leverage badge / display leverage applied on the trade cards. (P2)
-- Adjust Daily trades limit / cooldown configurations. (P2)
-- Refactor  to break it down into modular routers. (P3)
-- Implement PCR Alert system and MongoDB-persisted observability metrics. (P3)
-- Co-location / real broker API integration (Zerodha Kite, Angel One). (P3)
+**Completed work in this session:**
+- Cloned repo and synced to  (DONE)
+- Recreated missing  and  files (DONE)
+- Downgraded  to CPU-only () to fix ARM architecture crash (DONE)
+- Developed and integrated  &  (DONE)
+- Developed  with MongoDB state persistence and  (DONE)
+- Built  and wired it to  (DONE)
+- Injected Hybrid Brain fusion layer into  (DONE)
 
-**Completed work in this session**:
-- Multi-Stock Parallel Trading Support: Added Watchlist and max parallel trades (1-5) support in backend (, , ) and frontend modal. (DONE)
-- Kronos Stale Data Bug Fix: Cleared old stock state in  when user switches stocks. (DONE)
-- Disk Space Cleanup: Cleared  to resolve a [Errno 28] No space left on device error during screenshoting/testing. (DONE)
-- Auto-Discover Feature Implementation: Added backend endpoint and frontend UI. (DONE - Pending automated testing)
+**Earlier issues found/mentioned but not fixed:**
+*(None)*
 
-**Earlier issues found/mentioned but not fixed**:
-*None.*
-
-**Known issue recurrence from previous fork**:
+**Known issue recurrence from previous fork:**
 - Issue recurrence in previous fork: N/A
 - Recurrence count: 0
 - Status: N/A
 
-**Code Architecture**:
+**Code Architecture:**
+- : FastAPI server. Entry point is . Core agent logic lives in  (e.g., , ).
+- : React + Vite based SPA. UI components are in .
 
+**Key Technical Concepts:**
+FastAPI, React, MongoDB, PyTorch (CPU-only), Options Pricing Math (Put-Call Parity, B-S model basics), Algorithm Trading logic (RL agents, psychology heuristics, risk sizing).
 
-**Key Technical Concepts**:
-Frontend: React, Tailwind CSS, lightweight-charts.
-Backend: FastAPI, Python, PyMongo (Sync), Motor (Async), APScheduler, RL Agent (DreamerV3) implementation.
-Database: MongoDB.
-
-**key DB schema**:
+**key DB schema:**
 - : 
+- : Logs of every decision (, , , , ).
+- : Singleton for user trading parameters.
 
-**changes in tech stack**:
-- None in this session.
+**changes in tech stack:**
+-  MUST remain CPU-only (). Standard  attempts to load CUDA libraries and will crash this ARM container.
 
-**All files of reference**:
--  (Watchlist & Auto-Discover endpoints)
--  (State updates for watchlist/max_trades)
--  (Execution loop modified for multi-stock)
--  (Watchlist and Auto-Discover UI)
--  (Stale data bug fix)
+**All files of reference:**
+-  &  (Created manually; strictly required for app stability).
+-  (New: API for F&O scanner).
+-  (New: Scanner UI).
+-  (New: Logic for fear/fomo/survival tracking).
+-  (New: Endpoints for brain state/history).
+-  (New: Independent panel for Brain).
+-  (Modified: Where the DreamerV3 logic fuses with Hybrid Brain logic).
 
-**Areas that need refactoring**:
--  is getting very large and was noted in the backlog for a breakdown into modular routers.
+**Areas that need refactoring:**
+- None at the moment.
 
-**key api endpoints**:
+**key api endpoints:**
 - 
 - 
 - 
-
-**Critical Info for New Agent**:
-- **Language**: Always interact with the user in **Hinglish/Hindi (Roman Script)**.
-- **Disk Space**: The agent encountered a  error which was fixed by deleting pip caches. Monitor disk space if doing extensive screenshotting or logging.
-- **Testing**: The  was called for the Auto-Discover feature but terminated abruptly. You must rerun the testing agent to validate the feature.
-- **Database Threading Issue**: Backend uses  as the DB name and  (synchronous) for background executions.
-
-**documents and test reports created in this job**:
 - 
--  (Partial due to termination)
 
-**Last 10 User Messages and any pending HUMAN messages**:
-1. User: Please use ask_human tool and confirm your plan now. (Completed)
-2. User: Robot 3.O Ek sath multiple stock ke sath condition meet karke minimum 3trade parallel max 5 parallel run kar sake Also fix this with Kronos jab Mai main chart me Stock load karu tab Kronos me pehle wala stock ka data rah ja raha hai usko fix karo (Completed)
-3. User: Auto discover wala idea acha kar do (Implementation Completed, Testing Pending)
+**Critical Info for New Agent:**
+- **CRITICAL UI INSTRUCTION:** The user specifically commanded: . You MUST NOT include screenshot images or raw image content directly in your chat replies to the user. You can still use the screenshot tool for your own validation, but keep it silent.
+- **LANGUAGE REQUIREMENT:** ALWAYS reply to the user in **Hinglish** (a blend of Hindi and English).
+- **ENVIRONMENT:** Backend is running on a CPU-only ARM container. Do not upgrade to CUDA-based ML libraries.
+- The  block is now successfully injected into the response of the Robot 3.O state. Await user directions on whether they want this visually represented in the Robo Dashboard or want to trigger live trading tests.
+
+**documents and test reports created in this job:**
+*(None)*
+
+**Last 10 User Messages and any pending HUMAN messages:**
+1. Start the task now (Done)
+2. Fix this [Image removed] (Done -  creation & Torch CPU fix)
+3. Frontend (React) — One Click Button... Main router mein add karo... Backend (FastAPI)... Also, most important Ye pure F&O ko scan karega (Done - Parity Scanner)
+4. Apne code me isko improvise karo [Hybrid Brain snippet] (Done - Implemented Brain logic with Mongo persistence)
+5. Abhi se ek baar he screenshot maat show karna save karo isko (Acknowledged/Done)
+6. Hybrid brain ko Robot 3.O ke brain me dalna tha (Done - Integration finished, waiting on user for next UI/testing steps)
 
 **Project Health Check:**
-Healthy. No broken components, but final test suite for latest feature got interrupted.
+- Frontend: RUNNING
+- Backend: RUNNING (HTTP 200)
+- Database: RUNNING (MongoDB)
 
-**3rd Party Integrations**:
-- OpenAI/Emergent LLM (Requires Emergent LLM Key)
-- yfinance / NSE / BSE scrapers (Public APIs)
+**3rd Party Integrations:**
+- YFinance (Market data, python library)
 
-**Testing status**:
-- Testing agent used after significant changes: YES (Interrupted on the last run)
+**Testing status:**
+- Testing agent used after significant changes: NO
 - Troubleshoot agent used after agent stuck in loop: NO
-- Test files created: None
-- Known regressions: None
+- Test files created: None explicitly.
+- Known regressions: None.
 
-**Credentials to test flow**:
-None specific, managed by Emergent LLM key in .
+**Credentials to test flow:**
+None configured; app relies on local unprotected MongoDB.
 
-**What agent forgot to execute**:
-The agent did not update  with the newly implemented Auto-Discover feature before the environment terminated. Make sure to update the PRD upon finishing the tests.</analysis>
+**What agent forgot to execute:**
+Nothing explicitly forgotten. Waiting on user's preference on how to proceed with the newly fused Robot 3.O logic.</analysis>
