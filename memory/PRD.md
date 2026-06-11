@@ -18,142 +18,89 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 
 ## What's Been Implemented
 
-### Phase 1 — Foundation (Early Sessions)
-- Dark/light theme toggle
-- Mobile responsive layout
-- NSE stock search + live quotes
-- Interactive chart (lightweight-charts)
-- Technical indicators (RSI, MACD, BB, etc.)
+### Phase 1 — Foundation
+- Dark/light theme toggle, mobile responsive layout, NSE stock search + live quotes
+- Interactive chart (lightweight-charts), Technical indicators (RSI, MACD, BB, etc.)
 
 ### Phase 2 — AI Signals
-- MiroFish LangGraph multi-agent orchestration
-- Multi-Timeframe Scanner
-- Weighted AI Signals aggregator
-- SMC Canvas Overlay (FVG, Liquidity, Order Blocks)
-- BOS/CHoCH detection
-- Premium/Discount Zones
-- Fullscreen chart mode
+- MiroFish LangGraph multi-agent orchestration (5 LLM nodes: Tech→Vol→Sentiment→Risk→Decision)
+- Multi-Timeframe Scanner, Weighted AI Signals aggregator
+- SMC Canvas Overlay (FVG, Liquidity, Order Blocks, BOS/CHoCH, Supply/Demand)
 
 ### Phase 3 — DreamerV3 Robo-Trader
-- DreamerV3 world model RL agent
-- Kronos Forecast integration
-- Adaptive Learning Engine
-- Paper trading mode
-- Ensemble AI cockpit
+- DreamerV3 world model RL agent, Kronos Forecast integration
+- Adaptive Learning Engine, Paper trading mode
 
-### Phase 6 — Multi-Stock Parallel Trading + Kronos Fix (Jun 2026) ← LATEST
-- Multi-stock watchlist management via `GET/POST /api/robo/watchlist`
-- Trading loop scans all watchlist tickers per cycle, up to `max_parallel_trades` (1–5) simultaneous positions
-- `execution_engine`: `set_max_positions()` + `has_open_position_for(ticker)` added
-- `dreamer_robo_orchestrator`: `watchlist` + `max_parallel_trades` in `UserPreferences`
-- Settings modal: "Parallel Trading Watchlist" section with 1×–5× buttons + add/remove UI
-- Kronos stale data bug fixed: clears old forecast on stock change
+### Phase 4 — QUANT Module
+- RL agent (PER buffer, risk-adjusted reward), Portfolio Optimizer
+- Advanced Risk Panel, Sentiment Panel, Observability Panel
 
-### Phase 7 — Auto-Discover + Vertical Tabs UI (Jun 2026)
-- **Auto-Discover Momentum Scanner**: `GET /api/robo/watchlist/discover` — scans NSE F&O universe (50 stocks, 8 workers), scores on momentum, volume spike, trend strength, RSI sweet zone (0–100), returns top 8 candidates. 5-min cache with `?refresh=true` override.
-- **Vertical Right Sidebar Tabs**: Replaced horizontal tab bar with vertical tab strip (left side of right panel). Compact labels (SCAN, STRAT, PAPER, RL, ROBO, AI ASM, PICK, PE-CE, QNT). Green left-border active indicator. Responsive: Desktop 68px, iPad 60px, Mobile 52px width.
-- Responsive across Desktop (1920px), iPad (1024px), Mobile (390px)
+### Phase 5 — Linter Fixes + Background Tab Persistence
+- Fixed blocking Ruff errors, RLAgentPanel always mounted (CSS), dynamic agent weights
 
-### Phase 5 — Linter Fix & Background Tab Persistence (Feb 2026)
-- Fixed 3 Ruff F841 blocking linter errors in `dreamer_robo_orchestrator.py`
-- `RLAgentPanel` & `RoboDashboard` always mounted (CSS hide/show) — background training/polling continues on tab switch
-- Relaxed `META_CONFIDENCE_FLOOR` from 35→30, dynamic agent weights when DreamerV3 idle
-- 5X Leverage on BUY positions (paper + live)
-- Nifty/Sensex Options Chart fix (`/api/option/intraday`, `/api/option/sensex-intraday`)
+### Phase 6 — Multi-Stock Parallel Trading
+- Multi-stock watchlist management, parallel position sizing
+- Settings modal with watchlist add/remove + max_parallel_trades buttons
 
-### Phase 4 — QUANT Module (Feb 2026)
-**Backend new files:**
-- `rl_agent/per_buffer.py` — Prioritized Experience Replay (SumTree, IS weights)
-- `rl_agent/risk_reward.py` — Risk-adjusted reward (Sharpe+CVaR+Kelly+Sortino)
-- `rl_agent/portfolio_optimizer.py` — Mean-Variance + Black-Litterman + Kelly + CVaR + Efficient Frontier + SOR
-- `data_providers/sentiment_provider.py` — Lexicon sentiment + Fear&Greed index
-- `observability/metrics_engine.py` — Circuit breakers, kill switch, anomaly detection, Prometheus
-- `rl_agent/advanced_router.py` — 22 new API endpoints under /api/advanced/*
+### Phase 7 — Auto-Discover + Vertical Tabs UI
+- Auto-Discover Momentum Scanner (NSE F&O universe, 50 stocks)
+- Vertical Right Sidebar Tabs (SCAN/STRAT/PAPER/RL/ROBO/AI ASM/PICK/PE-CE/QNT)
 
-**Frontend new files:**
-- `PortfolioOptimizerPanel.jsx` — MV + BL + Kelly + CVaR + Efficient Frontier charts
-- `AdvancedRiskPanel.jsx` — Kill switch, circuit breakers, human-in-loop approval
-- `SentimentPanel.jsx` — News sentiment + Fear&Greed gauge
-- `ObservabilityPanel.jsx` — Equity curve, anomaly alerts, PER stats, continuous training toggle, Prometheus
+### Phase 8 — SMC Canvas Upgrades + DeltaDash + F&O Parity (Jun 2026)
+- F&O Put-Call Parity Scanner: `/api/options/parity-scanner`, "Open in Chart" button
+- DeltaDash Analysis Scoreboard: `/api/deltadash/scoreboard` (44+ tickers × 6 TFs)
+- ChartPanel.jsx massively upgraded: Supply/Demand Zones, Wyckoff Accumulation/Distribution,
+  Manipulation (Stop Hunts), Refined Entry with SL/TGT dashed lines + R:R ratios
 
-**UI Changes:**
-- New `⚡ QUANT` tab in TradingDashboard right panel
-- 4 sub-tabs: Portfolio / Risk / Sentiment / Observ.
-- TradingView-style grouped timeframe dropdown (with fixed positioning for mobile)
-
----
-
-## Key API Endpoints
-
-### Core
-- `POST /api/orderflow/analyze`
-- `POST /api/mirofish/analyze`
-- `GET /api/robo/*`
-- `GET /api/kronos/*`
-
-### QUANT (Phase 4)
-- `POST /api/advanced/portfolio/optimize` — MV / BL
-- `POST /api/advanced/portfolio/frontier` — Efficient frontier
-- `POST /api/advanced/portfolio/kelly` — Kelly per-asset
-- `POST /api/advanced/portfolio/cvar` — CVaR analysis
-- `POST /api/advanced/portfolio/hedge-suggest` — Options overlay
-- `POST /api/advanced/portfolio/smart-route` — Smart order routing
-- `GET  /api/advanced/risk/circuit-status`
-- `POST /api/advanced/risk/kill-switch`
-- `POST /api/advanced/risk/reset-circuit`
-- `GET  /api/advanced/risk/approvals`
-- `POST /api/advanced/risk/approve/{id}`
-- `GET  /api/advanced/sentiment/news`
-- `GET  /api/advanced/sentiment/market`
-- `GET  /api/advanced/sentiment/fear-greed`
-- `GET  /api/advanced/observability/metrics`
-- `GET  /api/advanced/observability/alerts`
-- `GET  /api/advanced/observability/prometheus`
-- `POST /api/advanced/observability/record-trade`
-- `POST /api/advanced/dreamer/continuous-toggle`
-- `GET  /api/advanced/dreamer/per-stats`
-- `GET  /api/advanced/dreamer/risk-reward`
-
----
-
-## DB Schema
-- `settings` — Robo orchestrator config (ticker, allocated_capital)
-- `robo_paper_trades` — Trade audit trail
-
----
-
-## Architecture Notes
-- `server.py` is monolithic (>10k lines) — modularization needed (tech debt)
-- `ChartPanel.jsx` is large (>1300 lines) — SMC logic should be extracted to hook
-- Observability state is in-memory (reset on restart) — acceptable for MVP
-- PER buffer is in-memory (reset on restart) — model saved to disk after each cycle
+### Phase 9 — Hybrid Super Brain v2 + Live P&L + Brain Visualization (Jun 2026)
+- **Hybrid Super Brain v2 (`hybrid_super_brain.py` fully rewritten as central brain)**:
+  - `MildSurvivalEngine` — MongoDB-persisted fear/boost scalar, grace period, overnight decay
+  - `PsychologicalHarvester` — FOMO, Apathy, Regime, Narrative Credibility from real market data
+  - `MetaReasoner` — MiroFish LangGraph 5-node pipeline (ainvoke, NOT SSE), agreement scoring
+  - `HybridSuperBrain` — Central orchestrator: DreamerV3 → StrategyCollaborator (6 agents) → 
+    MiroFish LangGraph → MetaReasoner → RPM heat gate → MongoDB audit
+  - `decide_sync()` + `update_daily_pnl_sync()` for DreamerV3 tight coupling
+- **Hybrid Brain Visualization in RoboAdvisorDashboard.jsx**:
+  - Fear Level circular gauge, Consecutive Misses, Daily Target, Last PnL cards
+  - "Fire Brain" button → live decision with confidence bar, component breakdown
+  - Brain State tab + Decision Log tab (scrollable audit)
+- **Unified Audit Log**: Brain decisions + Paper trades merged in `/api/robo/audit`
+- **Live P&L on Open Positions**: `GET /api/robo/positions` enriches each position with 
+  `current_price`, `unrealized_pnl`, `pnl_pct`, `price_change` (15s cache via yfinance)
+- **Watchlist Clear Fix**: `removeFromWatchlist` immediately POSTs to backend (no save-required)
 
 ---
 
 ## Prioritized Backlog
 
-### P0 (Critical)
-- [ ] server.py refactoring — split into domain routers
-- [ ] DEMON endpoint bug — `run_mini_ai_indicator()` tuple unpacking mismatch (server.py:5325)
+### P1
+- [ ] Run/test Auto-mode to evaluate live brain decisions natively in paper mode
+- [ ] Visualize StrategyCollaborator 6-agent signals in ROBO tab (radar/table view)
 
-### P1 (Next)
-- [ ] Live mode entry threshold check (50% in trading_loop.py)
-- [ ] PCR Alert system — popup when NIFTY/SENSEX PCR crosses threshold
-- [ ] Deep UX testing — MultiTF Scanner flows, win probability arc
-- [ ] Persist observability metrics to MongoDB
+### P2
+- [ ] PCR Alert system — popup on NIFTY/SENSEX PCR threshold cross
+- [ ] Real tick data — NSE WebSocket for sub-second price updates
+- [ ] Auto-mode brain override — when brain fires BUY and dreamer says HOLD, show override log
 
-### P2 (Enhancement)
-- [ ] 5x Leverage badge display on trade cards
-- [ ] Daily trades limit / cooldown config adjustments
-- [ ] Real tick data (NSE WebSocket subscription)
-- [ ] Reddit/X sentiment (needs API keys)
-- [ ] WhatsApp/Telegram share for scan results
-- [ ] Multiple expiry switch for Options Sheet
-- [ ] Advanced backtesting with P&L curves
-- [ ] Real Grafana dashboard config export
-- [ ] Co-location / real broker API (Zerodha Kite, Angel One)
+### P3
+- [ ] ChartPanel.jsx refactoring (~1700 lines → split into SmcOverlay.jsx, ChartCore.jsx)
+- [ ] server.py modularization (11k+ lines — route by feature into /agents/)
+- [ ] Kronos fix — TATAMOTORS.NS delisted ticker cleanup in default scan universe
 
-### P3 (Backlog)
-- [ ] WebXR AR overlay for mobile
-- [ ] LangGraph parallel agent execution
-- [ ] Multi-account portfolio tracking
+---
+
+## Key API Endpoints
+- `POST /api/hybrid-brain/decide` — Full 5-layer decision (psych+strategy+miro+dreamer+survival)
+- `GET  /api/hybrid-brain/state`  — Fear level, consecutive fails, daily target, PnL
+- `GET  /api/hybrid-brain/audit`  — Decision history (MongoDB)
+- `GET  /api/robo/positions`      — Open positions with live current_price + unrealized_pnl
+- `GET  /api/robo/audit`          — Paper trades + brain decisions merged
+- `GET  /api/deltadash/scoreboard`— 44+ tickers × 6 TF multi-indicator scorer
+- `POST /api/options/put-call-parity` — PCR calculator
+- `GET  /api/options/parity-scanner`  — Auto-scanner for all indices
+
+## DB Collections
+- `hybrid_brain_state` — survival fear/fail counters (MongoDB-persisted)
+- `hybrid_brain_audit` — all brain decisions log
+- `robo_user_preferences` — user trading settings singleton
+- `robo_orders` — all paper/live trade orders
