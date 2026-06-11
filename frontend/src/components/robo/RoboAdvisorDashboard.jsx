@@ -506,14 +506,33 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
               🤖
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
+              {/* Row 1: title + compact badges */}
+              <div className="flex items-center gap-1.5">
                 <h1 className="text-sm font-black text-white tracking-tight">Robot 3.O</h1>
-                <span className="text-[9px] text-zinc-500 font-mono">Robo-Advisor</span>
+                <span className="text-[9px] text-zinc-500 font-mono hidden xs:inline">Robo-Advisor</span>
+                {settings.risk_tolerance === 'danger' && (
+                  <span
+                    className="text-[7px] font-black px-1 py-px rounded animate-pulse"
+                    style={{ background: 'rgba(239,68,68,0.18)', color: '#f87171', border: '1px solid rgba(239,68,68,0.35)' }}
+                    data-testid="danger-mode-badge"
+                  >
+                    F&O
+                  </span>
+                )}
+                {isBrainActive && (
+                  <span
+                    className="text-[7px] font-black px-1 py-px rounded flex items-center gap-0.5 animate-pulse"
+                    style={{ background: 'rgba(139,92,246,0.18)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.35)' }}
+                    data-testid="brain-active-badge"
+                  >
+                    <span className="w-1 h-1 rounded-full bg-violet-400 animate-ping inline-block" />
+                    AI
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className={`flex items-center gap-1 ${statusCfg.pulse ? 'animate-pulse' : ''}`}
-                >
+              {/* Row 2: status + mode + ticker */}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <div className={`flex items-center gap-1 ${statusCfg.pulse ? 'animate-pulse' : ''}`}>
                   <div className="w-1.5 h-1.5 rounded-full" style={{ background: statusCfg.color }} />
                   <span className="text-[9px] font-semibold" style={{ color: statusCfg.color }}>
                     {statusCfg.label}
@@ -529,28 +548,8 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 {rs?.ticker && (
                   <>
                     <span className="text-[9px] text-zinc-600">·</span>
-                    <span className="text-[9px] font-mono text-zinc-400">{rs.ticker}</span>
+                    <span className="text-[9px] font-mono text-zinc-400 truncate max-w-[80px]">{rs.ticker}</span>
                   </>
-                )}
-                {settings.risk_tolerance === 'danger' && (
-                  <span
-                    className="text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse ml-1"
-                    style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }}
-                    data-testid="danger-mode-badge"
-                  >
-                    DANGER · F&O
-                  </span>
-                )}
-                {/* Brain Active indicator — shows when auto mode running + brain fired */}
-                {isBrainActive && (
-                  <span
-                    className="text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse ml-1 flex items-center gap-1"
-                    style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.4)' }}
-                    data-testid="brain-active-badge"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping inline-block" />
-                    BRAIN ON
-                  </span>
                 )}
               </div>
             </div>
