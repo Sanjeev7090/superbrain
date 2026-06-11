@@ -338,6 +338,48 @@ class HybridSuperBrain:
         except Exception:
             return 60.0
 
+    # ── Sync helper for thread-based callers (orchestrator worker) ────────────
+    def decide_sync(
+        self,
+        market_data: Dict[str, Any],
+        news: str = "",
+        symbol: str = "NIFTY",
+        dreamer_confidence: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Synchronous wrapper of think_and_decide() for thread workers
+        (e.g. dreamer_robo_orchestrator). Creates its own event loop."""
+        try:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    raise RuntimeError("event loop already running")
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            return loop.run_until_complete(
+                self.think_and_decide(
+                    market_data=market_data,
+                    news=news,
+                    symbol=symbol,
+                    dreamer_confidence=dreamer_confidence,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"[HybridBrain] decide_sync failed: {e}")
+            return {
+                "action": "HOLD",
+                "confidence": float(dreamer_confidence or 50.0),
+                "size_scalar": 1.0,
+                "psych": {}, "survival": {"fear": 0.0, "status": "good"},
+                "reasoning": f"hybrid brain unavailable: {e}",
+                "error": str(e),
+                "components": {}, "risk_alert": "good",
+            }
+
+    def update_daily_pnl_sync(self, pnl_pct: float):
+        """Sync wrapper used by the orchestrator worker every tick."""
+        self.current_pnl_pct = float(pnl_pct)
+
 
 # ─── Singleton ────────────────────────────────────────────────────────────────
 hybrid_brain = HybridSuperBrain()
