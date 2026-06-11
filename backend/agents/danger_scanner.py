@@ -20,6 +20,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Tuple
 
+from fastapi import HTTPException
+
 logger = logging.getLogger("danger_scanner")
 
 # ─── Full F&O Universe (indices first, then liquid stocks) ────────────────────
