@@ -62,10 +62,21 @@ function StatCard({ label, value, sub, color = '#a1a1aa', icon: Icon, glow }) {
 }
 
 // ── Open position mini-card ───────────────────────────────────────────────────
-function OpenPositionCard({ pos }) {
-  const isBuy = pos.direction === 'BUY';
+function OpenPositionCard({ pos, onClose }) {
+  const isBuy  = pos.direction === 'BUY';
   const hasPnl = pos.unrealized_pnl != null;
   const pnlPos = (pos.unrealized_pnl || 0) >= 0;
+  const [closing, setClosing] = useState(false);
+
+  const handleClose = async () => {
+    if (!window.confirm(`Close ${pos.ticker} position? This cannot be undone.`)) return;
+    setClosing(true);
+    try {
+      await onClose(pos.order_id);
+    } finally {
+      setClosing(false);
+    }
+  };
 
   return (
     <div
@@ -80,7 +91,7 @@ function OpenPositionCard({ pos }) {
       }}
       data-testid={`open-pos-${pos.order_id}`}
     >
-      {/* Top row: direction + ticker + mode + live P&L */}
+      {/* Top row: direction + ticker + mode + live P&L + close btn */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span
@@ -114,6 +125,22 @@ function OpenPositionCard({ pos }) {
           >
             {(pos.mode || 'PAPER').toUpperCase()}
           </span>
+          {onClose && (
+            <button
+              onClick={handleClose}
+              disabled={closing}
+              data-testid={`close-pos-btn-${pos.order_id}`}
+              title="Close this position"
+              className="text-[9px] font-bold px-2 py-0.5 rounded-lg transition-all disabled:opacity-40"
+              style={{
+                background: 'rgba(239,68,68,0.12)',
+                border: '1px solid rgba(239,68,68,0.35)',
+                color: '#fca5a5',
+              }}
+            >
+              {closing ? '...' : 'Close'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -385,6 +412,21 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         await fetchAll();
       } else {
         toast.error(res.data.error || 'Close-all failed');
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.detail || e.message);
+    }
+  };
+
+  const handleClosePosition = async (orderId) => {
+    try {
+      const res = await axios.post(`${API}/robo/close-position/${orderId}`);
+      if (res.data.success) {
+        const pnl = res.data.order?.pnl ?? res.data.pnl ?? null;
+        toast.success(`Position closed${pnl != null ? ` · P&L ₹${pnl.toFixed(0)}` : ''}`);
+        await fetchAll();
+      } else {
+        toast.error(res.data.error || 'Close failed');
       }
     } catch (e) {
       toast.error(e.response?.data?.detail || e.message);
@@ -798,7 +840,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {positions.map(pos => <OpenPositionCard key={pos.order_id} pos={pos} />)}
+              {positions.map(pos => <OpenPositionCard key={pos.order_id} pos={pos} onClose={handleClosePosition} />)}
             </div>
           )}
         </div>

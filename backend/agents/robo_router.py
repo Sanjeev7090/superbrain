@@ -812,25 +812,147 @@ async def cancel_pending_order(req: CancelPendingRequest):
 async def emergency_close_all():
     """
     Emergency: close ALL open positions immediately.
-    In live mode, this will place market sell/buy orders on Groww.
-    Use in emergencies — rapid market movement, unexpected circuit breakers, etc.
+    Closes both in-memory positions AND any DB-persisted OPEN positions
+    (e.g. from a previous server session).
     """
     try:
         from .execution_engine import engine
         from .dreamer_robo_orchestrator import _fetch_live_price, _prefs as prefs
-        live_price = _fetch_live_price(prefs.ticker) or 0.0
-        prices = {prefs.ticker: live_price}
+        import asyncio
+        from datetime import datetime, timezone
+
+        # ── 1. Collect all DB OPEN positions to get tickers for live prices ──
+        db = _get_robo_db()
+        cursor = db["robo_orders"].find({"status": "OPEN"}, {"_id": 0})
+        db_open = [doc async for doc in cursor]
+
+        # ── 2. Build price map (fetch live prices for all unique tickers) ────
+        unique_tickers = list({p.get("ticker") for p in db_open if p.get("ticker")})
+        mem_tickers    = [p.get("ticker") for p in engine.get_open_positions() if p.get("ticker")]
+        all_tickers    = list(set(unique_tickers + mem_tickers))
+
+        prices: dict = {}
+        if all_tickers:
+            prices = await asyncio.get_event_loop().run_in_executor(
+                None, _get_cached_live_prices, all_tickers
+            )
+        # fallback: use entry_price for any ticker with no live price
+        for pos in db_open:
+            t = pos.get("ticker")
+            if t and t not in prices:
+                prices[t] = pos.get("entry_price", 0.0)
+
+        # ── 3. Close in-memory positions ─────────────────────────────────────
         closed = engine.close_all_positions(prices, reason="EMERGENCY_CLOSE")
+        mem_closed_ids = {o.get("order_id") for o in closed}
+
+        # ── 4. Close DB positions not already in memory ───────────────────────
+        db_closed_count = 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for pos in db_open:
+            oid = pos.get("order_id")
+            if oid in mem_closed_ids:
+                continue  # already handled by engine
+            ticker     = pos.get("ticker", "")
+            exit_price = round(prices.get(ticker, pos.get("entry_price", 0.0)), 2)
+            entry      = pos.get("entry_price", 0.0) or exit_price
+            qty        = pos.get("quantity", 0) or 0
+            direction  = pos.get("direction", "BUY")
+            pnl        = round((exit_price - entry) * qty if direction == "BUY" else (entry - exit_price) * qty, 2)
+            await db["robo_orders"].update_one(
+                {"order_id": oid},
+                {"$set": {
+                    "status":      "CLOSED",
+                    "exit_price":  exit_price,
+                    "exit_time":   now_iso,
+                    "exit_reason": "EMERGENCY_CLOSE",
+                    "pnl":         pnl,
+                    "net_pnl":     pnl,
+                }},
+            )
+            db_closed_count += 1
+
+        total_closed = len(closed) + db_closed_count
         orch._upd(open_trade=None, status="paused")
         return {
-            "success":        True,
-            "closed_count":   len(closed),
-            "closed_orders":  closed,
-            "message":        f"Closed {len(closed)} position(s) at ₹{live_price:.2f}",
-            "disclaimer":     DISCLAIMER,
+            "success":      True,
+            "closed_count": total_closed,
+            "closed_orders": closed,
+            "message":      f"Closed {total_closed} position(s) (mem={len(closed)}, db={db_closed_count})",
+            "disclaimer":   DISCLAIMER,
         }
     except Exception as exc:
         logger.exception("[robo_router] emergency close-all failed")
+        return {"success": False, "error": str(exc)}
+
+
+# ─── 20b. POST /close-position/{order_id} ────────────────────────────────────
+@robo_router.post("/close-position/{order_id}")
+async def close_single_position(order_id: str):
+    """
+    Close a single position by order_id.
+    Handles both in-memory positions and DB-only (previous-session) positions.
+    """
+    try:
+        from .execution_engine import engine
+        import asyncio
+        from datetime import datetime, timezone
+
+        # ── Try in-memory close first ────────────────────────────────────────
+        mem_pos = next(
+            (p for p in engine.get_open_positions() if p.get("order_id") == order_id),
+            None
+        )
+        if mem_pos:
+            ticker = mem_pos.get("ticker", "")
+            live_prices = await asyncio.get_event_loop().run_in_executor(
+                None, _get_cached_live_prices, [ticker]
+            ) if ticker else {}
+            exit_price = live_prices.get(ticker) or mem_pos.get("entry_price", 0.0)
+            result = engine.close_position(order_id, exit_price, reason="MANUAL_CLOSE")
+            if result.get("success"):
+                return {"success": True, "order": result["order"], "source": "memory"}
+            return {"success": False, "error": result.get("error", "Close failed")}
+
+        # ── Fallback: close in DB if not in memory ────────────────────────────
+        db = _get_robo_db()
+        pos = await db["robo_orders"].find_one({"order_id": order_id, "status": "OPEN"}, {"_id": 0})
+        if not pos:
+            raise HTTPException(status_code=404, detail=f"Position {order_id} not found or already closed")
+
+        ticker     = pos.get("ticker", "")
+        live_prices = await asyncio.get_event_loop().run_in_executor(
+            None, _get_cached_live_prices, [ticker]
+        ) if ticker else {}
+        exit_price = round(live_prices.get(ticker) or pos.get("entry_price", 0.0), 2)
+        entry      = pos.get("entry_price", 0.0) or exit_price
+        qty        = pos.get("quantity", 0) or 0
+        direction  = pos.get("direction", "BUY")
+        pnl        = round((exit_price - entry) * qty if direction == "BUY" else (entry - exit_price) * qty, 2)
+        now_iso    = datetime.now(timezone.utc).isoformat()
+
+        await db["robo_orders"].update_one(
+            {"order_id": order_id},
+            {"$set": {
+                "status":      "CLOSED",
+                "exit_price":  exit_price,
+                "exit_time":   now_iso,
+                "exit_reason": "MANUAL_CLOSE",
+                "pnl":         pnl,
+                "net_pnl":     pnl,
+            }},
+        )
+        return {
+            "success":     True,
+            "order_id":    order_id,
+            "exit_price":  exit_price,
+            "pnl":         pnl,
+            "source":      "db",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[robo_router] close-position failed for %s", order_id)
         return {"success": False, "error": str(exc)}
 
 
