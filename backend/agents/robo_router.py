@@ -354,20 +354,45 @@ async def get_latest_decision():
 
 # ─── 9. GET /audit ────────────────────────────────────────────────────────────
 @robo_router.get("/audit")
-async def get_audit_trail(limit: int = Query(50, ge=1, le=100)):
-    """Get paper trade audit trail (last N closed trades) with summary statistics."""
+async def get_audit_trail(limit: int = Query(50, ge=1, le=100), include_brain: bool = Query(True)):
+    """Get paper trade audit trail (last N closed trades) with summary statistics.
+    
+    If include_brain=True (default), also fetches recent Hybrid Brain decisions and 
+    merges them as annotated entries in the timeline.
+    """
     trades    = orch.get_audit_trail(limit=limit)
     total_pnl = sum(t.get("pnl", 0) or 0 for t in trades)
     wins      = sum(1 for t in trades if (t.get("pnl") or 0) >= 0)
     losses    = len(trades) - wins
+
+    # Fetch and mix hybrid brain decisions
+    brain_decisions = []
+    if include_brain:
+        try:
+            from .hybrid_super_brain import hybrid_brain
+            raw = await hybrid_brain.get_recent_audit(limit=limit)
+            for d in raw:
+                brain_decisions.append({
+                    **d,
+                    "_entry_type": "brain_decision",
+                    "direction":   d.get("action", "HOLD"),
+                    "ticker":      d.get("symbol", "—"),
+                    "pnl":         None,
+                    "exit_reason": f"Brain:{d.get('action','?')} conf={d.get('confidence','?')}",
+                })
+        except Exception:
+            pass
+
     return {
-        "success":    True,
-        "trades":     trades,
-        "count":      len(trades),
-        "total_pnl":  round(total_pnl, 2),
-        "win_count":  wins,
-        "loss_count": losses,
-        "win_rate":   round(wins / max(len(trades), 1) * 100, 1),
+        "success":         True,
+        "trades":          trades,
+        "brain_decisions": brain_decisions,
+        "count":           len(trades),
+        "brain_count":     len(brain_decisions),
+        "total_pnl":       round(total_pnl, 2),
+        "win_count":       wins,
+        "loss_count":      losses,
+        "win_rate":        round(wins / max(len(trades), 1) * 100, 1),
     }
 
 

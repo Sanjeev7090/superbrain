@@ -183,6 +183,13 @@ export default function RoboDashboard({ selectedStock }) {
   const [modeWarning, setModeWarning]   = useState(null);
   const [showLiveWarn, setShowLiveWarn] = useState(false);
 
+  // Hybrid Brain state
+  const [brainState, setBrainState]       = useState(null);
+  const [brainDecision, setBrainDecision] = useState(null);
+  const [brainAudit, setBrainAudit]       = useState([]);
+  const [brainLoading, setBrainLoading]   = useState(false);
+  const [brainTab, setBrainTab]           = useState('state'); // 'state' | 'audit'
+
   // Sync ticker from parent
   useEffect(() => {
     if (selectedStock?.ticker && selectedStock.type !== 'CRYPTO' && selectedStock.type !== 'OPTION') {
@@ -193,15 +200,21 @@ export default function RoboDashboard({ selectedStock }) {
   // Fetch full state
   const fetchState = useCallback(async () => {
     try {
-      const [stRes, auditRes, loopRes, posRes, ordRes] = await Promise.all([
+      const [stRes, auditRes, loopRes, posRes, ordRes, brainStateRes, brainAuditRes] = await Promise.all([
         axios.get(`${API}/robo/status`),
         axios.get(`${API}/robo/audit?limit=20`),
         axios.get(`${API}/robo/loop-status`).catch(() => ({ data: {} })),
         axios.get(`${API}/robo/positions`).catch(() => ({ data: {} })),
         axios.get(`${API}/robo/orders?limit=30`).catch(() => ({ data: {} })),
+        axios.get(`${API}/hybrid-brain/state`).catch(() => ({ data: null })),
+        axios.get(`${API}/hybrid-brain/audit?limit=15`).catch(() => ({ data: { decisions: [] } })),
       ]);
       setRoboState(stRes.data);
       setAudit(auditRes.data.trades || []);
+      if (brainStateRes.data) setBrainState(brainStateRes.data);
+      if (brainAuditRes.data?.decisions) setBrainAudit(brainAuditRes.data.decisions);
+      // Also pick up brain decisions from combined audit endpoint
+      if (auditRes.data?.brain_decisions?.length) setBrainAudit(auditRes.data.brain_decisions);
       setAuditMeta({
         total_pnl: auditRes.data.total_pnl,
         win_count: auditRes.data.win_count,
@@ -388,6 +401,30 @@ export default function RoboDashboard({ selectedStock }) {
     try {
       await axios.post(`${API}/robo/reset-daily`);
       await fetchState();
+    } catch (e) { /* silent */ }
+  };
+
+  const handleBrainDecide = async () => {
+    setBrainLoading(true);
+    try {
+      const symbol = (settings.ticker || 'NIFTY').replace('.NS', '').replace('.BO', '');
+      const res = await axios.post(`${API}/hybrid-brain/decide`, { symbol });
+      setBrainDecision(res.data);
+      // Refresh audit list
+      const auditRes = await axios.get(`${API}/hybrid-brain/audit?limit=15`);
+      if (auditRes.data?.decisions) setBrainAudit(auditRes.data.decisions);
+    } catch (e) {
+      setError('Brain decide failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setBrainLoading(false);
+    }
+  };
+
+  const handleBrainResetDay = async () => {
+    try {
+      await axios.post(`${API}/hybrid-brain/reset-daily`);
+      const res = await axios.get(`${API}/hybrid-brain/state`);
+      if (res.data) setBrainState(res.data);
     } catch (e) { /* silent */ }
   };
 
@@ -1254,6 +1291,274 @@ export default function RoboDashboard({ selectedStock }) {
           </div>
         </div>
 
+        {/* ── HYBRID SUPER BRAIN ── */}
+        <div className="bg-zinc-900/80 border border-purple-700/40 rounded-2xl p-4">
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center text-xs font-black text-white">
+                HSB
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-white">Hybrid Super Brain</h2>
+                <p className="text-[10px] text-zinc-500">Psychology + Survival Engine · DreamerV3 Fusion</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Tab switcher */}
+              <div className="flex rounded-lg overflow-hidden border border-zinc-700">
+                {['state', 'audit'].map(t => (
+                  <button key={t} onClick={() => setBrainTab(t)}
+                    data-testid={`brain-tab-${t}`}
+                    className={`px-3 py-1 text-[10px] font-semibold capitalize transition-colors ${
+                      brainTab === t
+                        ? 'bg-purple-700/50 text-purple-200'
+                        : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                    }`}>{t === 'state' ? 'Brain State' : 'Decision Log'}</button>
+                ))}
+              </div>
+              <button
+                onClick={handleBrainDecide}
+                disabled={brainLoading}
+                data-testid="brain-decide-btn"
+                className="px-3 py-1.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/40 border border-purple-500/40 text-purple-300 text-xs font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {brainLoading ? '⟳ Thinking…' : '⚡ Fire Brain'}
+              </button>
+            </div>
+          </div>
+
+          {brainTab === 'state' && (
+            <>
+              {/* Brain State Metrics */}
+              {brainState ? (
+                <>
+                  {/* Fear Level + Key Metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    {/* Fear Level */}
+                    <div className={`rounded-xl p-3 text-center border ${
+                      brainState.fear_level > 0.6 ? 'bg-red-900/20 border-red-600/40'
+                      : brainState.fear_level > 0.3 ? 'bg-amber-900/20 border-amber-600/40'
+                      : 'bg-emerald-900/20 border-emerald-600/40'
+                    }`}>
+                      <p className="text-[10px] text-zinc-500 mb-1">Fear Level</p>
+                      <div className="relative w-12 h-12 mx-auto mb-1">
+                        <svg viewBox="0 0 44 44" className="w-full h-full -rotate-90">
+                          <circle cx="22" cy="22" r="18" fill="none" stroke="#374151" strokeWidth="5"/>
+                          <circle cx="22" cy="22" r="18" fill="none"
+                            stroke={brainState.fear_level > 0.6 ? '#ef4444' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981'}
+                            strokeWidth="5"
+                            strokeLinecap="round"
+                            strokeDasharray={`${brainState.fear_level * 113.1} 113.1`}
+                          />
+                        </svg>
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black"
+                          style={{ color: brainState.fear_level > 0.6 ? '#ef4444' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981' }}>
+                          {(brainState.fear_level * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <p className="text-[9px] font-semibold" style={{ color: brainState.fear_level > 0.6 ? '#ef4444' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981' }}>
+                        {brainState.fear_level > 0.8 ? 'CIRCUIT BREAKER' : brainState.fear_level > 0.6 ? 'High Fear' : brainState.fear_level > 0.3 ? 'Cautious' : 'Calm'}
+                      </p>
+                    </div>
+                    {/* Consecutive Fails */}
+                    <div className={`rounded-xl p-3 text-center border ${
+                      brainState.consecutive_fail >= 3 ? 'bg-red-900/20 border-red-600/40' : 'bg-zinc-800/60 border-zinc-700/40'
+                    }`}>
+                      <p className="text-[10px] text-zinc-500 mb-1">Consec. Misses</p>
+                      <p className="text-2xl font-black" style={{ color: brainState.consecutive_fail >= 3 ? '#ef4444' : brainState.consecutive_fail >= 1 ? '#f59e0b' : '#10b981' }}>
+                        {brainState.consecutive_fail}
+                      </p>
+                      <p className="text-[9px] text-zinc-500">/{brainState.config?.grace_days || 5} grace</p>
+                    </div>
+                    {/* Daily Target */}
+                    <div className="bg-zinc-800/60 border border-zinc-700/40 rounded-xl p-3 text-center">
+                      <p className="text-[10px] text-zinc-500 mb-1">Daily Target</p>
+                      <p className="text-lg font-bold text-blue-400">{brainState.daily_target_pct?.toFixed(2)}%</p>
+                      <p className="text-[9px] text-zinc-500">PnL: <span className={brainState.current_pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{brainState.current_pnl_pct?.toFixed(2)}%</span></p>
+                    </div>
+                    {/* Last PnL */}
+                    <div className={`rounded-xl p-3 text-center border ${
+                      (brainState.last_pnl_pct || 0) >= (brainState.daily_target_pct || 0) ? 'bg-emerald-900/20 border-emerald-600/40' : 'bg-zinc-800/60 border-zinc-700/40'
+                    }`}>
+                      <p className="text-[10px] text-zinc-500 mb-1">Last PnL</p>
+                      <p className="text-lg font-bold" style={{ color: (brainState.last_pnl_pct || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                        {brainState.last_pnl_pct?.toFixed(3)}%
+                      </p>
+                      <p className="text-[9px] text-zinc-500">Grace days: {brainState.grace_days}</p>
+                    </div>
+                  </div>
+
+                  {/* Latest Brain Decision */}
+                  {brainDecision && (
+                    <div className={`rounded-xl border p-4 mb-4 ${
+                      brainDecision.action === 'BUY' ? 'bg-emerald-900/15 border-emerald-600/40'
+                      : brainDecision.action === 'SELL' ? 'bg-red-900/15 border-red-600/40'
+                      : 'bg-zinc-800/40 border-zinc-700/40'
+                    }`}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`px-4 py-2 rounded-xl text-lg font-black ${
+                            brainDecision.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400'
+                            : brainDecision.action === 'SELL' ? 'bg-red-500/20 text-red-400'
+                            : 'bg-zinc-700/50 text-zinc-300'
+                          }`} data-testid="brain-action-badge">
+                            {brainDecision.action === 'BUY' ? '▲' : brainDecision.action === 'SELL' ? '▼' : '●'} {brainDecision.action}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-white">{brainDecision.symbol}</p>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <div className="h-1.5 w-24 bg-zinc-700 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full"
+                                  style={{
+                                    width: `${brainDecision.confidence}%`,
+                                    background: brainDecision.confidence > 68 ? '#10b981' : brainDecision.confidence > 40 ? '#f59e0b' : '#ef4444',
+                                  }}/>
+                              </div>
+                              <span className="text-[10px] text-zinc-400">{brainDecision.confidence?.toFixed(1)}% conf</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                            brainDecision.risk_alert === 'good' ? 'bg-emerald-900/30 text-emerald-400'
+                            : brainDecision.risk_alert === 'warning' ? 'bg-amber-900/30 text-amber-400'
+                            : 'bg-red-900/30 text-red-400'
+                          }`}>{(brainDecision.risk_alert || '').toUpperCase()}</span>
+                          <p className="text-[9px] text-zinc-600 mt-1">
+                            {brainDecision.timestamp ? new Date(brainDecision.timestamp).toLocaleTimeString('en-IN') : ''}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Psychology Breakdown */}
+                      {brainDecision.psych && (
+                        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mb-3">
+                          {[
+                            { label: 'FOMO', val: brainDecision.psych.fomo_score, color: brainDecision.psych.fomo_score > 0.6 ? '#f97316' : '#a1a1aa', fmt: v => (v*100).toFixed(0)+'%' },
+                            { label: 'Apathy', val: brainDecision.psych.apathy_score, color: brainDecision.psych.apathy_score > 0.5 ? '#6b7280' : '#a1a1aa', fmt: v => (v*100).toFixed(0)+'%' },
+                            { label: 'Cred', val: brainDecision.psych.narrative_credibility, color: brainDecision.psych.narrative_credibility > 0.5 ? '#10b981' : '#ef4444', fmt: v => (v*100).toFixed(0)+'%' },
+                            { label: 'Momentum', val: brainDecision.psych.momentum, color: brainDecision.psych.momentum > 0.55 ? '#10b981' : brainDecision.psych.momentum < 0.4 ? '#ef4444' : '#f59e0b', fmt: v => (v*100).toFixed(0)+'%' },
+                            { label: 'Vol Thrust', val: brainDecision.psych.volume_thrust, color: brainDecision.psych.volume_thrust > 1.2 ? '#10b981' : '#a1a1aa', fmt: v => v?.toFixed(2)+'x' },
+                            { label: 'Volatility', val: brainDecision.psych.volatility, color: brainDecision.psych.volatility > 0.025 ? '#f97316' : '#a1a1aa', fmt: v => (v*100).toFixed(2)+'%' },
+                          ].map(({ label, val, color, fmt: f }) => (
+                            <div key={label} className="bg-zinc-900/60 rounded-lg p-2 text-center">
+                              <p className="text-[9px] text-zinc-600 mb-0.5">{label}</p>
+                              <p className="text-xs font-bold" style={{ color }}>{val != null ? f(val) : '—'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Components Breakdown */}
+                      {brainDecision.components && (
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          {Object.entries(brainDecision.components).map(([k, v]) => (
+                            <span key={k} className={`text-[9px] px-2 py-0.5 rounded-full font-semibold ${
+                              v > 0 ? 'bg-emerald-900/30 text-emerald-400' : v < 0 ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800 text-zinc-500'
+                            }`}>
+                              {k.replace(/_/g,' ')}: {v > 0 ? '+' : ''}{Number(v).toFixed(2)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Regime + Reasoning */}
+                      <div className="flex items-start gap-2">
+                        {brainDecision.psych?.regime && (
+                          <span className="text-[9px] px-2 py-0.5 rounded bg-purple-900/40 text-purple-300 font-semibold shrink-0">
+                            {brainDecision.psych.regime.toUpperCase().replace('_', ' ')}
+                          </span>
+                        )}
+                        {brainDecision.psych?.hidden_value_gap && (
+                          <p className="text-[10px] text-zinc-400 leading-relaxed">{brainDecision.psych.hidden_value_gap}</p>
+                        )}
+                      </div>
+                      {brainDecision.reasoning && (
+                        <p className="text-[9px] text-zinc-600 mt-2 font-mono border-t border-zinc-800 pt-2">
+                          {brainDecision.reasoning}
+                        </p>
+                      )}
+                      {brainDecision.cached && (
+                        <p className="text-[9px] text-amber-600 mt-1">Cached decision (60s TTL)</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Size Scalar + PnL Update */}
+                  {brainDecision && (
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <div className="bg-zinc-800/60 border border-zinc-700/40 rounded-lg px-3 py-2 text-center">
+                        <p className="text-[9px] text-zinc-500">Size Scalar</p>
+                        <p className="text-sm font-bold text-violet-400">×{brainDecision.size_scalar?.toFixed(3)}</p>
+                      </div>
+                      <button
+                        onClick={handleBrainResetDay}
+                        className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400 text-xs transition-colors"
+                        data-testid="brain-reset-day-btn"
+                      >
+                        Reset Brain Day
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex flex-col items-center py-8 text-zinc-600">
+                  <p className="text-xs">Loading brain state…</p>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Audit Tab */}
+          {brainTab === 'audit' && (
+            <div>
+              {brainAudit.length === 0 ? (
+                <div className="text-center py-8 text-zinc-600">
+                  <p className="text-xs">No brain decisions logged yet</p>
+                  <p className="text-[10px] mt-1">Click "Fire Brain" to generate the first decision</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto custom-scroll" data-testid="brain-audit-list">
+                  {brainAudit.map((d, i) => (
+                    <div key={d.id || i} className={`flex items-start gap-3 p-3 rounded-xl border ${
+                      d.action === 'BUY' ? 'bg-emerald-900/10 border-emerald-800/40'
+                      : d.action === 'SELL' ? 'bg-red-900/10 border-red-800/40'
+                      : 'bg-zinc-800/30 border-zinc-700/30'
+                    }`}>
+                      <span className={`text-[10px] font-black px-2 py-0.5 rounded shrink-0 ${
+                        d.action === 'BUY' ? 'bg-emerald-500/20 text-emerald-400'
+                        : d.action === 'SELL' ? 'bg-red-500/20 text-red-400'
+                        : 'bg-zinc-700 text-zinc-400'
+                      }`}>{d.action}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] text-zinc-300 font-semibold">{d.symbol}</span>
+                          <span className="text-[9px] text-violet-400">{d.confidence?.toFixed(1)}% conf</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                            d.risk_alert === 'good' ? 'text-emerald-400 bg-emerald-900/30'
+                            : d.risk_alert === 'danger' ? 'text-red-400 bg-red-900/30'
+                            : 'text-amber-400 bg-amber-900/30'
+                          }`}>{(d.risk_alert||'').toUpperCase()}</span>
+                          {d.psych?.regime && (
+                            <span className="text-[9px] text-purple-400">{d.psych.regime}</span>
+                          )}
+                        </div>
+                        {d.psych?.hidden_value_gap && (
+                          <p className="text-[9px] text-zinc-500 mt-0.5 truncate">{d.psych.hidden_value_gap}</p>
+                        )}
+                      </div>
+                      <span className="text-[9px] text-zinc-600 shrink-0">
+                        {d.timestamp ? new Date(d.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* ── Open Position ── */}
         {openTrade && openTrade.status === 'OPEN' && (
           <div className="bg-zinc-900/80 border border-emerald-600/30 rounded-2xl p-4">
@@ -1310,8 +1615,14 @@ export default function RoboDashboard({ selectedStock }) {
         {/* ── Audit Trail ── */}
         <div className="bg-zinc-900/80 border border-zinc-700/40 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-white">Paper Trade Audit Log</h2>
+            <div>
+              <h2 className="text-sm font-bold text-white">Unified Audit Log</h2>
+              <p className="text-[10px] text-zinc-500">Paper Trades + Brain Decisions</p>
+            </div>
             <div className="flex items-center gap-4 text-xs">
+              {brainAudit.length > 0 && (
+                <span className="text-purple-400">{brainAudit.length} brain</span>
+              )}
               {auditMeta.win_count != null && (
                 <>
                   <span className="text-emerald-400">{auditMeta.win_count} W</span>
@@ -1324,14 +1635,30 @@ export default function RoboDashboard({ selectedStock }) {
               )}
             </div>
           </div>
-          {audit.length === 0 ? (
+          {audit.length === 0 && brainAudit.length === 0 ? (
             <div className="text-center py-8 text-zinc-600">
               <span className="text-3xl block mb-2">📋</span>
-              <p className="text-sm">No closed paper trades yet</p>
-              <p className="text-xs mt-1">Start auto mode to begin paper trading</p>
+              <p className="text-sm">No trades or brain decisions yet</p>
+              <p className="text-xs mt-1">Start auto mode or Fire Brain to begin</p>
             </div>
           ) : (
-            <div className="space-y-1 max-h-64 overflow-y-auto custom-scroll">
+            <div className="space-y-1 max-h-64 overflow-y-auto custom-scroll" data-testid="unified-audit-log">
+              {/* Brain decisions mixed in at top */}
+              {brainAudit.slice(0, 5).map((d, i) => (
+                <div key={d.id || `brain-${i}`} className={`flex items-center gap-2 py-2 px-3 rounded-lg border ${
+                  d.action === 'BUY' ? 'bg-purple-900/10 border-purple-800/30' : d.action === 'SELL' ? 'bg-red-900/10 border-red-800/20' : 'bg-zinc-800/20 border-zinc-700/20'
+                }`}>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-800/40 text-purple-300 font-bold shrink-0">BRAIN</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0`}
+                    style={{ background: d.action==='BUY'?'#10b98133':d.action==='SELL'?'#ef444433':'#6b72803a', color: d.action==='BUY'?'#10b981':d.action==='SELL'?'#ef4444':'#9ca3af' }}>
+                    {d.action}
+                  </span>
+                  <span className="text-zinc-300 text-xs font-mono flex-1 truncate">{d.symbol}</span>
+                  <span className="text-violet-400 text-[10px]">{d.confidence?.toFixed(1)}%</span>
+                  <span className="text-[9px] text-zinc-600">{d.timestamp ? new Date(d.timestamp).toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'}) : ''}</span>
+                </div>
+              ))}
+              {/* Paper trades */}
               {audit.map((trade, i) => (
                 <TradeRow key={trade.trade_id || i} trade={trade} index={i} />
               ))}

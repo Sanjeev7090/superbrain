@@ -176,6 +176,13 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const [lastRefresh,    setLastRefresh]    = useState(null);
   const [activeTab,      setActiveTab]      = useState('overview'); // overview | agents
 
+  // Hybrid Brain state
+  const [brainState,    setBrainState]    = useState(null);
+  const [brainDecision, setBrainDecision] = useState(null);
+  const [brainAudit,    setBrainAudit]    = useState([]);
+  const [brainLoading,  setBrainLoading]  = useState(false);
+  const [brainTab,      setBrainTab]      = useState('state'); // state | audit
+
   const pollRef = useRef(null);
 
   // Sync ticker from parent chart
@@ -190,11 +197,13 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   // ── Fetch all state ────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
-      const [st, loop, pos, ord] = await Promise.all([
+      const [st, loop, pos, ord, brSt, brAudit] = await Promise.all([
         axios.get(`${API}/robo/status`),
         axios.get(`${API}/robo/loop-status`).catch(() => ({ data: {} })),
         axios.get(`${API}/robo/positions`).catch(() => ({ data: {} })),
         axios.get(`${API}/robo/orders?limit=50`).catch(() => ({ data: {} })),
+        axios.get(`${API}/hybrid-brain/state`).catch(() => ({ data: null })),
+        axios.get(`${API}/hybrid-brain/audit?limit=10`).catch(() => ({ data: { decisions: [] } })),
       ]);
 
       // Core state
@@ -229,6 +238,10 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
           brokerage:     ord.data.daily_brokerage,
         });
       }
+      // Brain
+      if (brSt.data) setBrainState(brSt.data);
+      if (brAudit.data?.decisions) setBrainAudit(brAudit.data.decisions);
+
       setLastRefresh(new Date());
     } catch { /* silent */ }
   }, []);
@@ -323,6 +336,31 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
       await axios.post(`${API}/robo/reset-daily`);
       await fetchAll();
       toast.success('Daily counters reset');
+    } catch { /* silent */ }
+  };
+
+  const handleBrainDecide = async () => {
+    setBrainLoading(true);
+    try {
+      const symbol = (settings.ticker || 'NIFTY').replace('.NS', '').replace('.BO', '');
+      const res = await axios.post(`${API}/hybrid-brain/decide`, { symbol });
+      setBrainDecision(res.data);
+      const auditRes = await axios.get(`${API}/hybrid-brain/audit?limit=10`);
+      if (auditRes.data?.decisions) setBrainAudit(auditRes.data.decisions);
+      toast.success(`Brain: ${res.data.action} @ ${res.data.confidence?.toFixed(1)}% conf`);
+    } catch (e) {
+      toast.error('Brain decide failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setBrainLoading(false);
+    }
+  };
+
+  const handleBrainResetDay = async () => {
+    try {
+      await axios.post(`${API}/hybrid-brain/reset-daily`);
+      const res = await axios.get(`${API}/hybrid-brain/state`);
+      if (res.data) setBrainState(res.data);
+      toast.success('Brain day reset — fear decayed');
     } catch { /* silent */ }
   };
 
@@ -622,6 +660,268 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         {/* ── Trade Explainability Log ──────────────────────────────────── */}
         <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-2xl p-4">
           <TradeExplainability orders={orders} orderStats={orderStats} />
+        </div>
+
+        {/* ── Hybrid Super Brain ────────────────────────────────────────── */}
+        <div
+          className="rounded-2xl p-4 border"
+          style={{ background: 'rgba(88,28,135,0.06)', borderColor: 'rgba(139,92,246,0.25)' }}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black"
+                style={{ background: 'linear-gradient(135deg,#7c3aed,#c026d3)', color: '#fff' }}>
+                HSB
+              </div>
+              <div>
+                <h3 className="text-xs font-black text-white">Hybrid Super Brain</h3>
+                <p className="text-[9px] text-zinc-500">Psychology + Survival · DreamerV3 Fusion</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Sub-tabs */}
+              <div className="flex rounded-lg border border-zinc-800 overflow-hidden">
+                {[['state', 'Brain State'], ['audit', 'Decision Log']].map(([t, label]) => (
+                  <button key={t} onClick={() => setBrainTab(t)}
+                    data-testid={`brain-tab-${t}`}
+                    className={`px-2.5 py-1 text-[9px] font-bold transition-colors ${
+                      brainTab === t
+                        ? 'bg-violet-700/40 text-violet-200'
+                        : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+                    }`}>{label}</button>
+                ))}
+              </div>
+              <button
+                onClick={handleBrainDecide}
+                disabled={brainLoading}
+                data-testid="brain-decide-btn"
+                className="px-3 py-1 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+                style={{ background: 'rgba(124,58,237,0.2)', border: '1px solid rgba(139,92,246,0.4)', color: '#c4b5fd' }}
+              >
+                {brainLoading ? '⟳ Thinking…' : '⚡ Fire Brain'}
+              </button>
+            </div>
+          </div>
+
+          {/* Brain State tab */}
+          {brainTab === 'state' && (
+            <>
+              {/* Key metrics row */}
+              {brainState && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                  {/* Fear gauge */}
+                  <div className={`rounded-xl p-3 text-center border ${
+                    brainState.fear_level > 0.6 ? 'bg-red-900/15 border-red-700/40'
+                    : brainState.fear_level > 0.3 ? 'bg-amber-900/15 border-amber-700/40'
+                    : 'bg-emerald-900/15 border-emerald-700/40'
+                  }`}>
+                    <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-1.5">Fear Level</p>
+                    <div className="relative w-10 h-10 mx-auto mb-1">
+                      <svg viewBox="0 0 44 44" className="w-full h-full -rotate-90">
+                        <circle cx="22" cy="22" r="17" fill="none" stroke="#27272a" strokeWidth="5"/>
+                        <circle cx="22" cy="22" r="17" fill="none"
+                          stroke={brainState.fear_level > 0.6 ? '#ef4444' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981'}
+                          strokeWidth="5" strokeLinecap="round"
+                          strokeDasharray={`${brainState.fear_level * 106.8} 106.8`}
+                        />
+                      </svg>
+                      <span className="absolute inset-0 flex items-center justify-center text-[9px] font-black"
+                        style={{ color: brainState.fear_level > 0.6 ? '#ef4444' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981' }}>
+                        {(brainState.fear_level * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <p className="text-[8px] font-bold"
+                      style={{ color: brainState.fear_level > 0.8 ? '#ef4444' : brainState.fear_level > 0.6 ? '#f97316' : brainState.fear_level > 0.3 ? '#f59e0b' : '#10b981' }}>
+                      {brainState.fear_level > 0.8 ? 'CIRCUIT BREAK' : brainState.fear_level > 0.6 ? 'High Fear' : brainState.fear_level > 0.3 ? 'Cautious' : 'Calm'}
+                    </p>
+                  </div>
+                  {/* Consecutive fails */}
+                  <div className={`rounded-xl p-3 text-center border ${
+                    brainState.consecutive_fail >= 3 ? 'bg-red-900/15 border-red-700/40' : 'bg-zinc-900/60 border-zinc-800/50'
+                  }`}>
+                    <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-1.5">Consec. Misses</p>
+                    <p className="text-2xl font-black tabular-nums"
+                      style={{ color: brainState.consecutive_fail >= 3 ? '#ef4444' : brainState.consecutive_fail >= 1 ? '#f59e0b' : '#10b981' }}>
+                      {brainState.consecutive_fail}
+                    </p>
+                    <p className="text-[8px] text-zinc-600">/{brainState.config?.grace_days || 5} grace</p>
+                  </div>
+                  {/* Daily target */}
+                  <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-xl p-3 text-center">
+                    <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-1.5">Daily Target</p>
+                    <p className="text-lg font-black text-blue-400">{brainState.daily_target_pct?.toFixed(2)}%</p>
+                    <p className="text-[8px] text-zinc-600">
+                      PnL: <span className={brainState.current_pnl_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                        {brainState.current_pnl_pct?.toFixed(3)}%
+                      </span>
+                    </p>
+                  </div>
+                  {/* Last PnL */}
+                  <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-xl p-3 text-center">
+                    <p className="text-[8px] text-zinc-600 uppercase tracking-wider mb-1.5">Last PnL</p>
+                    <p className="text-lg font-black"
+                      style={{ color: (brainState.last_pnl_pct||0) >= 0 ? '#10b981' : '#ef4444' }}>
+                      {brainState.last_pnl_pct?.toFixed(3)}%
+                    </p>
+                    <p className="text-[8px] text-zinc-600">Grace: {brainState.grace_days}d</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Latest Decision */}
+              {brainDecision ? (
+                <div className={`rounded-xl border p-3 mb-3 ${
+                  brainDecision.action === 'BUY' ? 'bg-emerald-900/10 border-emerald-700/30'
+                  : brainDecision.action === 'SELL' ? 'bg-red-900/10 border-red-700/30'
+                  : 'bg-zinc-900/60 border-zinc-800/50'
+                }`}>
+                  {/* Action + conf */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-sm font-black px-3 py-1 rounded-lg ${
+                        brainDecision.action === 'BUY' ? 'bg-emerald-500/15 text-emerald-400'
+                        : brainDecision.action === 'SELL' ? 'bg-red-500/15 text-red-400'
+                        : 'bg-zinc-700/50 text-zinc-300'
+                      }`} data-testid="brain-action-badge">
+                        {brainDecision.action === 'BUY' ? '▲' : brainDecision.action === 'SELL' ? '▼' : '●'} {brainDecision.action}
+                      </span>
+                      <div>
+                        <p className="text-xs font-bold text-white">{brainDecision.symbol}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <div className="h-1.5 w-20 bg-zinc-800 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full" style={{
+                              width: `${brainDecision.confidence}%`,
+                              background: brainDecision.confidence > 68 ? '#10b981' : brainDecision.confidence > 40 ? '#f59e0b' : '#ef4444',
+                            }}/>
+                          </div>
+                          <span className="text-[9px] text-zinc-400">{brainDecision.confidence?.toFixed(1)}% conf</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-bold ${
+                        brainDecision.risk_alert === 'good' ? 'bg-emerald-900/30 text-emerald-400'
+                        : brainDecision.risk_alert === 'warning' ? 'bg-amber-900/30 text-amber-400'
+                        : 'bg-red-900/30 text-red-400'
+                      }`}>{(brainDecision.risk_alert||'').toUpperCase()}</span>
+                      {brainDecision.cached && (
+                        <p className="text-[8px] text-amber-600 mt-0.5">cached</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Psych metrics */}
+                  {brainDecision.psych && (
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 mb-2">
+                      {[
+                        { l: 'FOMO',     v: brainDecision.psych.fomo_score,             f: v => (v*100).toFixed(0)+'%', c: brainDecision.psych.fomo_score > 0.6 ? '#f97316' : '#a1a1aa' },
+                        { l: 'Apathy',   v: brainDecision.psych.apathy_score,           f: v => (v*100).toFixed(0)+'%', c: brainDecision.psych.apathy_score > 0.5 ? '#6b7280' : '#a1a1aa' },
+                        { l: 'Cred',     v: brainDecision.psych.narrative_credibility,  f: v => (v*100).toFixed(0)+'%', c: brainDecision.psych.narrative_credibility > 0.5 ? '#10b981' : '#ef4444' },
+                        { l: 'Momentum', v: brainDecision.psych.momentum,               f: v => (v*100).toFixed(0)+'%', c: brainDecision.psych.momentum > 0.55 ? '#10b981' : brainDecision.psych.momentum < 0.4 ? '#ef4444' : '#f59e0b' },
+                        { l: 'Vol×',     v: brainDecision.psych.volume_thrust,          f: v => v?.toFixed(2)+'x',       c: brainDecision.psych.volume_thrust > 1.2 ? '#10b981' : '#a1a1aa' },
+                        { l: 'Regime',   v: brainDecision.psych.regime,                 f: v => (v||'—').replace('_',' ').slice(0,8), c: '#a78bfa' },
+                      ].map(({ l, v, f, c }) => (
+                        <div key={l} className="bg-zinc-900/70 rounded-lg p-1.5 text-center">
+                          <p className="text-[8px] text-zinc-600 mb-0.5">{l}</p>
+                          <p className="text-[10px] font-bold" style={{ color: c }}>{v != null ? f(v) : '—'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Confidence components */}
+                  {brainDecision.components && (
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {Object.entries(brainDecision.components).map(([k, v]) => (
+                        <span key={k} className={`text-[8px] px-1.5 py-0.5 rounded-full font-semibold ${
+                          Number(v) > 0 ? 'bg-emerald-900/30 text-emerald-400' : Number(v) < 0 ? 'bg-red-900/30 text-red-400' : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          {k.replace(/_/g,' ')}: {Number(v) > 0 ? '+' : ''}{Number(v).toFixed(2)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Hidden value gap + reasoning */}
+                  {brainDecision.psych?.hidden_value_gap && (
+                    <p className="text-[9px] text-zinc-400 mb-1">{brainDecision.psych.hidden_value_gap}</p>
+                  )}
+                  {brainDecision.reasoning && (
+                    <p className="text-[8px] text-zinc-600 font-mono border-t border-zinc-800/60 pt-1.5">
+                      {brainDecision.reasoning}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-zinc-800/40 bg-zinc-900/40 py-6 text-center text-zinc-600">
+                  <p className="text-xs">No brain decision yet</p>
+                  <p className="text-[9px] mt-0.5">Click "⚡ Fire Brain" to generate a fresh decision</p>
+                </div>
+              )}
+
+              {/* Size scalar + reset */}
+              {brainDecision && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-lg px-3 py-1.5">
+                    <p className="text-[8px] text-zinc-600">Size Scalar</p>
+                    <p className="text-sm font-black text-violet-400">×{brainDecision.size_scalar?.toFixed(3)}</p>
+                  </div>
+                  <button
+                    onClick={handleBrainResetDay}
+                    className="px-3 py-1.5 rounded-lg bg-zinc-800/50 hover:bg-zinc-800 border border-zinc-800 text-zinc-500 hover:text-zinc-300 text-[10px] font-semibold transition-all"
+                    data-testid="brain-reset-day-btn"
+                  >
+                    Reset Brain Day
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Audit tab */}
+          {brainTab === 'audit' && (
+            <>
+              {brainAudit.length === 0 ? (
+                <div className="py-8 text-center text-zinc-600">
+                  <p className="text-xs">No brain decisions logged</p>
+                  <p className="text-[9px] mt-0.5">Click "⚡ Fire Brain" to start</p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-72 overflow-y-auto" data-testid="brain-audit-list">
+                  {brainAudit.map((d, i) => (
+                    <div key={d.id || i} className={`flex items-start gap-2 p-2.5 rounded-xl border ${
+                      d.action === 'BUY' ? 'bg-emerald-900/08 border-emerald-800/30'
+                      : d.action === 'SELL' ? 'bg-red-900/08 border-red-800/30'
+                      : 'bg-zinc-900/50 border-zinc-800/40'
+                    }`}>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded shrink-0"
+                        style={{
+                          background: d.action==='BUY'?'rgba(16,185,129,0.15)':d.action==='SELL'?'rgba(239,68,68,0.15)':'rgba(107,114,128,0.2)',
+                          color:      d.action==='BUY'?'#10b981':d.action==='SELL'?'#ef4444':'#9ca3af',
+                        }}>{d.action}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-bold text-white">{d.symbol}</span>
+                          <span className="text-[9px] text-violet-400">{d.confidence?.toFixed(1)}%</span>
+                          <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
+                            d.risk_alert==='good'?'bg-emerald-900/25 text-emerald-400':d.risk_alert==='danger'?'bg-red-900/25 text-red-400':'bg-amber-900/25 text-amber-400'
+                          }`}>{(d.risk_alert||'').toUpperCase()}</span>
+                          {d.psych?.regime && <span className="text-[8px] text-purple-400">{d.psych.regime}</span>}
+                        </div>
+                        {d.psych?.hidden_value_gap && (
+                          <p className="text-[8px] text-zinc-500 mt-0.5 truncate">{d.psych.hidden_value_gap}</p>
+                        )}
+                      </div>
+                      <span className="text-[8px] text-zinc-600 shrink-0">
+                        {d.timestamp ? new Date(d.timestamp).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* ── Capital State Vector (collapsed) ─────────────────────────── */}
