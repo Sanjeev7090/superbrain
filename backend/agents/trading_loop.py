@@ -494,17 +494,32 @@ class TradingLoop:
                     # Alignment boost: both agree → +10% confidence
                     if brain_action == meta_signal and meta_signal != "HOLD":
                         boosted_conf = min(100, meta_conf + 10)
-                        meta = {**meta, "confidence": boosted_conf, "brain_boost": True}
+                        meta = {
+                            **meta, "confidence": boosted_conf, "brain_boost": True,
+                            "brain_reason": f"Brain+Dreamer agreed → {meta_signal} | Brain {brain_conf:.0f}% conf +10 boost",
+                        }
                     # Fear circuit: brain fear > 0.7 → force HOLD
                     elif brain_fear > 0.70:
-                        meta = {**meta, "signal": "HOLD", "confidence": 0,
-                                "brain_override": f"HOLD — brain fear {brain_fear:.2f}"}
+                        meta = {
+                            **meta, "signal": "HOLD", "confidence": 0,
+                            "brain_override": f"HOLD — brain fear {brain_fear:.2f}",
+                            "brain_reason": f"Brain CIRCUIT-BREAKER: fear={brain_fear:.0%} → forced HOLD",
+                        }
                         logger.info("[TradingLoop][%s] Brain fear=%.2f → forced HOLD for %s",
                                     cycle_id, brain_fear, ticker)
                     # Disagreement: brain says opposite → reduce confidence by 15%
                     elif brain_action != "HOLD" and brain_action != meta_signal:
                         reduced_conf = max(0, meta_conf - 15)
-                        meta = {**meta, "confidence": reduced_conf, "brain_disagree": True}
+                        meta = {
+                            **meta, "confidence": reduced_conf, "brain_disagree": True,
+                            "brain_reason": f"Brain disagrees ({brain_action} vs Dreamer {meta_signal}) → −15 conf penalty",
+                        }
+                    else:
+                        # Brain neutral (HOLD) while dreamer has signal — note it
+                        meta = {
+                            **meta,
+                            "brain_reason": f"Brain neutral (HOLD) | Dreamer {meta_signal} {meta_conf:.0f}%",
+                        }
 
                 _upd(
                     current_decision    = {

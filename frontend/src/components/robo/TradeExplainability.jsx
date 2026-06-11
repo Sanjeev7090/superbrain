@@ -79,6 +79,25 @@ function ExplainRow({ order, index }) {
           {exitInfo.icon} {exitInfo.label}
         </span>
 
+        {/* Brain alignment badge — inline in summary row */}
+        {meta.brain_reason && (
+          <span
+            className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 hidden md:inline ${
+              meta.brain_boost    ? 'bg-emerald-900/30 text-emerald-400'
+              : meta.brain_override ? 'bg-red-900/30 text-red-400'
+              : meta.brain_disagree ? 'bg-amber-900/30 text-amber-400'
+              : 'bg-purple-900/30 text-purple-400'
+            }`}
+            title={meta.brain_reason}
+            data-testid={`brain-reason-badge-${order.order_id}`}
+          >
+            {meta.brain_boost     ? '🧠 Agreed'
+             : meta.brain_override ? '🧠 Override'
+             : meta.brain_disagree ? '🧠 Disagree'
+             : '🧠'}
+          </span>
+        )}
+
         {/* Time */}
         <span className="text-[9px] text-zinc-600 ml-auto flex-shrink-0 hidden sm:block">
           {fmtTime(order.entry_time)}
@@ -128,6 +147,24 @@ function ExplainRow({ order, index }) {
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Technical Conf</span>
                     <span className="font-bold text-blue-400">{fmtPct(meta.tech_conf)}</span>
+                  </div>
+                )}
+
+                {/* Brain Alignment row inside DreamerV3 card */}
+                {meta.brain_reason && (
+                  <div className="mt-2 pt-2 border-t border-zinc-800">
+                    <p className="text-[9px] font-bold text-fuchsia-400 mb-1">HSB Alignment</p>
+                    <p
+                      className={`text-[9px] leading-relaxed px-2 py-1 rounded ${
+                        meta.brain_boost    ? 'bg-emerald-900/20 text-emerald-300'
+                        : meta.brain_override ? 'bg-red-900/20 text-red-300'
+                        : meta.brain_disagree ? 'bg-amber-900/20 text-amber-300'
+                        : 'bg-purple-900/20 text-purple-300'
+                      }`}
+                      data-testid={`brain-reason-detail-${order.order_id}`}
+                    >
+                      {meta.brain_reason}
+                    </p>
                   </div>
                 )}
               </div>

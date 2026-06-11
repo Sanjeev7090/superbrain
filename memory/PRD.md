@@ -62,7 +62,19 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
   - DreamerV3 gets +25% confidence boost in danger mode
   - Frontend: 2×2 risk grid, red Danger card with skull SVG icon, "F&O ONLY" badge,
     "Danger Mode Active" warning notice, "DANGER · F&O" header badge, F&O Picks panel
-- **Hybrid Brain Auto-Activation with Auto Start**:
+- **Hybrid Brain Auto-Activation** (P10 already documented above)
+- **Fear Reset Fix + Brain Audit Alignment** (Jun 2026):
+  - `MildSurvivalEngine.manual_reset()` — full zero-clear (fear=0.0, consecutive_fail=0, last_pnl=0)
+    vs `reset_daily()` — overnight −0.35 decay only
+  - `POST /api/hybrid-brain/reset-daily` now calls `manual_reset()` (manual=True) → fear clears instantly
+  - Also clears `_decision_cache` so next `think_and_decide()` runs fresh
+  - Brain alignment reason in trade audit: trading loop writes `brain_reason` to `strategy_meta`:
+    - "Brain+Dreamer agreed → BUY | +10 boost"
+    - "Brain CIRCUIT-BREAKER: fear=85% → forced HOLD"
+    - "Brain disagrees (SELL vs Dreamer BUY) → −15 conf penalty"
+    - "Brain neutral (HOLD) | Dreamer BUY 65%"
+  - `TradeExplainability.jsx`: brain_reason badge inline in audit row (color-coded: green=agreed,
+    red=override, amber=disagree, purple=neutral); full reason shown in DreamerV3 card "HSB Alignment" section
   - `POST /api/robo/start` fires `_warmup_brain()` as asyncio background task
   - Warmup: loads survival state from MongoDB → `think_and_decide()` → updates `_state` immediately
   - `_state` gets: `brain_active`, `brain_action`, `brain_confidence`, `brain_fear`, `brain_regime`

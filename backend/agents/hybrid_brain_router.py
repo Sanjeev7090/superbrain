@@ -140,7 +140,14 @@ async def update_pnl(body: PnLUpdate):
 
 @router.post("/reset-daily")
 async def reset_daily():
-    await hybrid_brain.reset_for_new_day()
+    """
+    Manual brain reset — fully clears fear level (0.0), consecutive fails, and PnL tracker.
+    Use this when you want to give the brain a fresh start after a rough period.
+    Automatic overnight reset decays fear by 0.35; this endpoint resets it to zero.
+    """
+    await hybrid_brain.reset_for_new_day(manual=True)
+    # Also clear cached decisions so next decide() uses fresh state
+    hybrid_brain._decision_cache.clear()
     return await state()
 
 

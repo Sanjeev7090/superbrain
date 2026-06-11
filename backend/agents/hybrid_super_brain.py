@@ -115,8 +115,22 @@ class MildSurvivalEngine:
             }
 
     async def reset_daily(self):
+        """
+        New-day overnight decay — called automatically at midnight.
+        Decays fear by 0.35 (natural overnight recovery), resets consecutive_fail.
+        """
         self.consecutive_fail = 0
         self.fear_level = max(0.0, self.fear_level - 0.35)
+        self.last_pnl_pct = 0.0
+        await self.persist()
+
+    async def manual_reset(self):
+        """
+        Manual full reset — called when user clicks 'Reset Brain Day' button.
+        Completely clears fear level, consecutive fails, and PnL tracker.
+        """
+        self.consecutive_fail = 0
+        self.fear_level = 0.0
         self.last_pnl_pct = 0.0
         await self.persist()
 
@@ -568,9 +582,17 @@ class HybridSuperBrain:
         self.survival.update(self.current_pnl_pct)
         await self.survival.persist()
 
-    async def reset_for_new_day(self):
+    async def reset_for_new_day(self, manual: bool = False):
+        """Reset brain for a new trading day.
+        
+        manual=True  → full fear clear (user clicked 'Reset Brain Day')
+        manual=False → overnight decay (called automatically at midnight)
+        """
         await self.survival.load()
-        await self.survival.reset_daily()
+        if manual:
+            await self.survival.manual_reset()
+        else:
+            await self.survival.reset_daily()
         self.current_pnl_pct = 0.0
 
     # ── Sync helpers (used by orchestrator worker thread) ────────────────────
