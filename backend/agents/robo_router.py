@@ -568,11 +568,37 @@ async def set_mode(req: ModeRequest):
         return {"success": False, "error": str(exc)}
 
 
+# ─── Live price cache (ticker → {price, ts}) refreshed at most every 15s ─────
+_lp_cache: dict = {}
+
+def _get_cached_live_prices(tickers: list) -> dict:
+    """Fetch live prices for a list of tickers; returns {ticker: price}. 15s cache."""
+    import time
+    now = time.time()
+    result = {}
+    stale = [t for t in tickers if (now - _lp_cache.get(t, {}).get("ts", 0)) > 15]
+
+    if stale:
+        try:
+            from .dreamer_robo_orchestrator import _fetch_live_price
+            for t in stale:
+                p = _fetch_live_price(t)
+                if p:
+                    _lp_cache[t] = {"price": p, "ts": now}
+        except Exception:
+            pass
+
+    for t in tickers:
+        result[t] = _lp_cache.get(t, {}).get("price")
+    return result
+
+
 # ─── 15. GET /positions ───────────────────────────────────────────────────────
 @robo_router.get("/positions")
 async def get_open_positions():
     """
     Currently open positions — merges in-memory + DB (OPEN status) for persistence across restarts.
+    Enriches each position with live current_price, unrealized_pnl, pnl_pct.
     """
     try:
         from .execution_engine import engine
@@ -589,10 +615,34 @@ async def get_open_positions():
         except Exception:
             extra_open = []
 
+        all_positions = mem_positions + extra_open
+
+        # Enrich with live price + unrealized P&L
+        unique_tickers = list({p.get("ticker") for p in all_positions if p.get("ticker")})
+        if unique_tickers:
+            import asyncio
+            live_prices = await asyncio.get_event_loop().run_in_executor(
+                None, _get_cached_live_prices, unique_tickers
+            )
+            for pos in all_positions:
+                ticker = pos.get("ticker")
+                cp = live_prices.get(ticker) if ticker else None
+                entry = pos.get("entry_price") or 0
+                qty   = pos.get("quantity") or 0
+                direction = pos.get("direction", "BUY")
+                if cp and entry and qty:
+                    pnl = (cp - entry) * qty if direction == "BUY" else (entry - cp) * qty
+                    invested = entry * qty or 1
+                    pos["current_price"]   = round(cp, 2)
+                    pos["unrealized_pnl"]  = round(pnl, 2)
+                    pos["pnl_pct"]         = round(pnl / invested * 100, 2)
+                    pos["price_change"]    = round(cp - entry, 2)
+                    pos["price_change_pct"]= round((cp - entry) / entry * 100, 2) if entry else 0
+
         return {
             "success":           True,
             "mode":              engine.mode,
-            "open_positions":    mem_positions + extra_open,
+            "open_positions":    all_positions,
             "pending_positions": stats["pending_list"],
             "shadow_signals":    stats["shadow_list"],
             "open_count":        stats["open_positions"] + len(extra_open),

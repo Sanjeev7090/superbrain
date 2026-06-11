@@ -145,7 +145,17 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
     setWlResults([]);
   };
 
-  const removeFromWatchlist = (t) => setWatchlist(prev => prev.filter(x => x !== t));
+  const removeFromWatchlist = async (t) => {
+    const updated = watchlist.filter(x => x !== t);
+    setWatchlist(updated);
+    // Immediately persist to backend so removal survives without clicking Save
+    try {
+      await axios.post(`${API}/robo/watchlist`, {
+        watchlist:           updated,
+        max_parallel_trades: maxParallel,
+      });
+    } catch { /* silent — main save will re-sync */ }
+  };
 
   const runAutoDiscover = async (forceRefresh = false) => {
     setDiscovering(true);

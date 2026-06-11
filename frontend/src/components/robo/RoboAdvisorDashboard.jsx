@@ -64,15 +64,23 @@ function StatCard({ label, value, sub, color = '#a1a1aa', icon: Icon, glow }) {
 // ── Open position mini-card ───────────────────────────────────────────────────
 function OpenPositionCard({ pos }) {
   const isBuy = pos.direction === 'BUY';
+  const hasPnl = pos.unrealized_pnl != null;
+  const pnlPos = (pos.unrealized_pnl || 0) >= 0;
+
   return (
     <div
       className="bg-zinc-900/80 border rounded-xl p-3 transition-all"
       style={{
-        borderColor: isBuy ? '#10b98140' : '#ef444440',
-        boxShadow: `0 0 16px ${isBuy ? '#10b981' : '#ef4444'}10`,
+        borderColor: hasPnl
+          ? (pnlPos ? '#10b98150' : '#ef444450')
+          : (isBuy ? '#10b98140' : '#ef444440'),
+        boxShadow: hasPnl
+          ? `0 0 20px ${pnlPos ? '#10b981' : '#ef4444'}15`
+          : `0 0 16px ${isBuy ? '#10b981' : '#ef4444'}10`,
       }}
       data-testid={`open-pos-${pos.order_id}`}
     >
+      {/* Top row: direction + ticker + mode + live P&L */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span
@@ -91,13 +99,45 @@ function OpenPositionCard({ pos }) {
             </span>
           )}
         </div>
-        <span
-          className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-800"
-          style={{ color: pos.mode === 'live' ? '#ef4444' : pos.mode === 'shadow' ? '#818cf8' : '#a1a1aa' }}
-        >
-          {(pos.mode || 'PAPER').toUpperCase()}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {hasPnl && (
+            <span
+              className={`text-[10px] font-black px-2 py-0.5 rounded-lg ${pnlPos ? 'bg-emerald-900/30 text-emerald-400' : 'bg-red-900/30 text-red-400'}`}
+              data-testid={`pos-unrealized-pnl-${pos.order_id}`}
+            >
+              {pnlPos ? '+' : ''}₹{Math.abs(pos.unrealized_pnl || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+            </span>
+          )}
+          <span
+            className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-800"
+            style={{ color: pos.mode === 'live' ? '#ef4444' : pos.mode === 'shadow' ? '#818cf8' : '#a1a1aa' }}
+          >
+            {(pos.mode || 'PAPER').toUpperCase()}
+          </span>
+        </div>
       </div>
+
+      {/* Live price row */}
+      {pos.current_price != null && (
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <span className="text-[9px] text-zinc-500">CMP</span>
+          <span className="text-[11px] font-black text-white">₹{pos.current_price?.toLocaleString('en-IN')}</span>
+          {pos.price_change != null && (
+            <span className={`text-[9px] font-semibold ${pos.price_change >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {pos.price_change >= 0 ? '+' : ''}₹{pos.price_change?.toFixed(2)}
+              {pos.price_change_pct != null && ` (${pos.price_change_pct >= 0 ? '+' : ''}${pos.price_change_pct?.toFixed(2)}%)`}
+            </span>
+          )}
+          {pos.pnl_pct != null && (
+            <span className={`ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded ${
+              pos.pnl_pct >= 0 ? 'text-emerald-300 bg-emerald-900/20' : 'text-red-300 bg-red-900/20'
+            }`} data-testid={`pos-pnl-pct-${pos.order_id}`}>
+              {pos.pnl_pct >= 0 ? '+' : ''}{pos.pnl_pct?.toFixed(2)}%
+            </span>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-1.5 text-center">
         {[
           { l: 'Entry',  v: fmtInr(pos.entry_price),    c: '#f59e0b' },
