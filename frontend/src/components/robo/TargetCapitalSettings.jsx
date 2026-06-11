@@ -14,9 +14,10 @@ const fmtInr = v => `₹${fmt(v, 0)}`;
 const fmtPct = (v, d = 1) => v == null ? '—' : `${Number(v).toFixed(d)}%`;
 
 const RISK_LEVELS = [
-  { key: 'conservative', label: 'Conservative', icon: '🛡️', desc: 'Lower risk, lower returns. Tight SL.' },
-  { key: 'moderate',     label: 'Moderate',     icon: '⚖️', desc: 'Balanced risk/reward. Recommended.' },
-  { key: 'aggressive',   label: 'Aggressive',   icon: '⚡', desc: 'Higher risk, higher target. Wider SL.' },
+  { key: 'conservative', label: 'Conservative', icon: 'shield',     desc: 'Lower risk, lower returns. Tight SL.', color: '#10b981' },
+  { key: 'moderate',     label: 'Moderate',     icon: 'scale',      desc: 'Balanced risk/reward. Recommended.', color: '#3b82f6' },
+  { key: 'aggressive',   label: 'Aggressive',   icon: 'zap',        desc: 'Higher risk, higher target. Wider SL.', color: '#f59e0b' },
+  { key: 'danger',       label: 'Danger',       icon: 'skull',      desc: 'F&O Universe Only · PCR Priority · No direct stock trades.', color: '#ef4444', warn: true },
 ];
 
 const TARGET_PRESETS  = [250, 500, 1000, 2000, 5000];
@@ -359,22 +360,74 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
             </div>
             <div>
               <label className="block text-xs font-bold text-zinc-300 mb-2">Risk Tolerance</label>
-              <div className="flex gap-1.5">
-                {RISK_LEVELS.map(({ key, label, icon }) => (
-                  <button
-                    key={key}
-                    onClick={() => setForm(f => ({ ...f, risk_tolerance: key }))}
-                    className={`flex-1 py-2 rounded-xl text-[10px] font-bold border transition-all ${
-                      form.risk_tolerance === key
-                        ? 'bg-violet-600/20 border-violet-500/50 text-violet-300'
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700'
-                    }`}
-                    title={RISK_LEVELS.find(r => r.key === key)?.desc}
-                  >
-                    {icon} {label}
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 gap-1.5">
+                {RISK_LEVELS.map(({ key, label, icon, desc, color, warn }) => {
+                  const isActive = form.risk_tolerance === key;
+                  const isDanger = key === 'danger';
+                  return (
+                    <button
+                      key={key}
+                      data-testid={`risk-level-${key}`}
+                      onClick={() => setForm(f => ({ ...f, risk_tolerance: key }))}
+                      className={`relative flex flex-col items-start px-3 py-2 rounded-xl border transition-all text-left ${
+                        isActive
+                          ? isDanger
+                            ? 'bg-red-900/20 border-red-500/60 text-red-300'
+                            : 'bg-violet-600/20 border-violet-500/50 text-violet-300'
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700'
+                      }`}
+                      title={desc}
+                      style={isActive && isDanger ? { boxShadow: '0 0 16px rgba(239,68,68,0.2)' } : undefined}
+                    >
+                      {isDanger && isActive && (
+                        <span className="absolute -top-1.5 -right-1.5 text-[8px] font-black px-1.5 py-0.5 rounded-full bg-red-500 text-white animate-pulse">
+                          F&O ONLY
+                        </span>
+                      )}
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span
+                          className="w-4 h-4 rounded flex items-center justify-center"
+                          style={{ background: isActive ? `${color}25` : 'transparent' }}
+                        >
+                          {icon === 'shield'  && <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke={isActive ? color : '#71717a'} strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>}
+                          {icon === 'scale'   && <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke={isActive ? color : '#71717a'} strokeWidth="2.5"><path d="M12 3v18M5 6l7-3 7 3M4 10l8 4 8-4M3 14l9 4.5L21 14"/></svg>}
+                          {icon === 'zap'     && <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke={isActive ? color : '#71717a'} strokeWidth="2.5"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
+                          {icon === 'skull'   && <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke={isActive ? color : '#71717a'} strokeWidth="2.5"><path d="M12 2a9 9 0 0 1 9 9c0 3.6-2 6.8-5 8.3V21H8v-1.7C5 17.8 3 14.6 3 11a9 9 0 0 1 9-9zm-3 9a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0zm6 0a1.5 1.5 0 1 0 3 0 1.5 1.5 0 0 0-3 0z"/></svg>}
+                        </span>
+                        <span className="text-[10px] font-bold" style={{ color: isActive ? color : undefined }}>
+                          {label}
+                        </span>
+                      </div>
+                      <span className="text-[8px] text-zinc-600 leading-tight">{
+                        isDanger
+                          ? 'F&O scan · PCR priority'
+                          : desc.split('.')[0]
+                      }</span>
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* Danger mode notice */}
+              {form.risk_tolerance === 'danger' && (
+                <div
+                  className="mt-2 rounded-xl px-3 py-2 border flex items-start gap-2"
+                  style={{ background: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)' }}
+                  data-testid="danger-mode-warning"
+                >
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0 mt-0.5" fill="none" stroke="#ef4444" strokeWidth="2.5">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                  <div>
+                    <p className="text-[10px] font-black text-red-400 mb-0.5">Danger Mode Active</p>
+                    <p className="text-[9px] text-red-300/70 leading-relaxed">
+                      Direct equity trades disabled. Robot will auto-scan entire F&O universe (indices + 30 stocks),
+                      prioritize by PCR signal strength, and pick the best opportunity each cycle.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

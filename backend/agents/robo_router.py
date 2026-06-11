@@ -84,7 +84,7 @@ class SettingsRequest(BaseModel):
     )
     ticker: Optional[str] = Field(None, description="NSE/BSE ticker (e.g. RELIANCE.NS)")
     risk_tolerance: Optional[str] = Field(
-        None, description="conservative | moderate | aggressive"
+        None, description="conservative | moderate | aggressive | danger"
     )
     mode: Optional[str] = Field(
         None, description="paper | live  (live applies 30% extra safety multiplier)"
@@ -128,7 +128,7 @@ class RiskPreviewRequest(BaseModel):
     """What-if calculator — preview risk profile without saving."""
     daily_profit_target: float = Field(..., gt=0,    description="Daily target in ₹")
     allocated_capital:   float = Field(..., gt=1000, description="Capital in ₹")
-    risk_tolerance:      str   = Field("moderate",  description="conservative|moderate|aggressive")
+    risk_tolerance:      str   = Field("moderate",  description="conservative|moderate|aggressive|danger")
     ticker:              str   = Field("RELIANCE.NS", description="NSE ticker for live ATR fetch")
 
 
@@ -1249,3 +1249,32 @@ async def auto_discover_watchlist(refresh: bool = False):
     _discover_cache = {"ts": now, "data": payload}
 
     return {"success": True, "from_cache": False, **payload}
+
+
+
+# ─── 24. GET /danger-scan ─────────────────────────────────────────────────────
+@robo_router.get("/danger-scan")
+async def danger_mode_scan(
+    top: int = Query(5, ge=1, le=15, description="Top N F&O picks to return"),
+    force: bool = Query(False, description="Force fresh scan (bypass 90s cache)"),
+):
+    """
+    Danger Mode — F&O Universe Scanner.
+    Scans all F&O underlyings (indices + 25 liquid stocks) ranked by:
+      • Momentum score (5d return, volume spike, ATR, RSI sweet-zone)
+      • PCR parity boost (Put-Call ratio directional signal)
+    Used automatically when risk_tolerance = 'danger'. No direct equity trades.
+    """
+    try:
+        from .danger_scanner import async_danger_scan
+        results = await async_danger_scan(top_n=top, force=force)
+        return {
+            "success":    True,
+            "top_picks":  results,
+            "count":      len(results),
+            "mode":       "danger",
+            "note":       "Danger mode: F&O universe scan with PCR priority. No direct stock trades.",
+            "scanned":    len(results),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Danger scan failed: {e}")

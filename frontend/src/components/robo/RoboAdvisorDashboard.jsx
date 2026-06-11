@@ -223,6 +223,10 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const [brainLoading,  setBrainLoading]  = useState(false);
   const [brainTab,      setBrainTab]      = useState('state'); // state | audit
 
+  // Danger mode picks
+  const [dangerPicks, setDangerPicks]     = useState([]);
+  const [dangerScanning, setDangerScanning] = useState(false);
+
   const pollRef = useRef(null);
 
   // Sync ticker from parent chart
@@ -404,6 +408,18 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
     } catch { /* silent */ }
   };
 
+  const handleDangerScan = async (force = false) => {
+    setDangerScanning(true);
+    try {
+      const res = await axios.get(`${API}/robo/danger-scan?top=8${force ? '&force=true' : ''}`);
+      if (res.data?.top_picks) setDangerPicks(res.data.top_picks);
+    } catch (e) {
+      toast.error('Danger scan failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setDangerScanning(false);
+    }
+  };
+
   // ── Derived ────────────────────────────────────────────────────────────────
   const rs          = roboState;
   const rp          = rs?.risk_profile || {};
@@ -413,6 +429,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const isActive    = rs?.auto_mode || false;
   const dailyPnl    = rs?.daily_pnl || 0;
   const target      = rs?.daily_profit_target || settings.daily_profit_target || 1;
+  const isDangerMode = settings.risk_tolerance === 'danger';
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -455,6 +472,15 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                     <span className="text-[9px] text-zinc-600">·</span>
                     <span className="text-[9px] font-mono text-zinc-400">{rs.ticker}</span>
                   </>
+                )}
+                {settings.risk_tolerance === 'danger' && (
+                  <span
+                    className="text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse ml-1"
+                    style={{ background: 'rgba(239,68,68,0.2)', color: '#f87171', border: '1px solid rgba(239,68,68,0.4)' }}
+                    data-testid="danger-mode-badge"
+                  >
+                    DANGER · F&O
+                  </span>
                 )}
               </div>
             </div>
@@ -696,6 +722,109 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
             </div>
           )}
         </div>
+
+        {/* ── DANGER MODE: F&O Universe Picks ───────────────────────────── */}
+        {isDangerMode && (
+          <div
+            className="rounded-2xl border p-4"
+            style={{ background: 'rgba(239,68,68,0.05)', borderColor: 'rgba(239,68,68,0.25)' }}
+            data-testid="danger-picks-panel"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.4)' }}
+                >
+                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="#ef4444" strokeWidth="2.5">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-red-400">Danger Mode — F&O Picks</p>
+                  <p className="text-[9px] text-zinc-600">Momentum + PCR Priority · Auto-refreshes each cycle</p>
+                </div>
+              </div>
+              <button
+                onClick={() => handleDangerScan(true)}
+                disabled={dangerScanning}
+                data-testid="danger-scan-btn"
+                className="px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all disabled:opacity-50"
+                style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5' }}
+              >
+                {dangerScanning ? '⟳ Scanning…' : '🔍 Scan Now'}
+              </button>
+            </div>
+
+            {dangerPicks.length === 0 ? (
+              <div className="py-6 text-center text-zinc-600">
+                <p className="text-xs">No scan results yet</p>
+                <p className="text-[9px] mt-0.5">Click "Scan Now" to run F&O universe scan</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5" data-testid="danger-picks-list">
+                {dangerPicks.map((pick, i) => {
+                  const pcrColor = pick.pcr_signal === 'STRONGLY_BULLISH' ? '#10b981'
+                    : pick.pcr_signal === 'BULLISH' ? '#34d399'
+                    : pick.pcr_signal === 'BEARISH' ? '#f87171'
+                    : pick.pcr_signal === 'STRONGLY_BEARISH' ? '#ef4444'
+                    : '#6b7280';
+                  return (
+                    <div key={pick.ticker}
+                      className="flex items-center gap-2 px-3 py-2.5 rounded-xl border"
+                      style={{ background: i === 0 ? 'rgba(239,68,68,0.08)' : 'rgba(39,39,42,0.5)', borderColor: i === 0 ? 'rgba(239,68,68,0.35)' : 'rgba(63,63,70,0.5)' }}
+                      data-testid={`danger-pick-${pick.ticker}`}
+                    >
+                      {/* Rank */}
+                      <span className="text-[9px] font-black w-4 text-center"
+                        style={{ color: i === 0 ? '#ef4444' : '#6b7280' }}>
+                        #{i + 1}
+                      </span>
+                      {/* Type badge */}
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                        style={{ background: pick.type === 'index' ? 'rgba(139,92,246,0.2)' : 'rgba(59,130,246,0.15)', color: pick.type === 'index' ? '#a78bfa' : '#60a5fa' }}>
+                        {pick.type === 'index' ? 'IDX' : 'STK'}
+                      </span>
+                      {/* Ticker + sector */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-black text-white">{pick.ticker.replace('.NS','').replace('.BO','')}</span>
+                          <span className="text-[8px] text-zinc-600">{pick.sector}</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-[9px] font-semibold ${pick.r5d >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {pick.r5d >= 0 ? '+' : ''}{pick.r5d}% 5d
+                          </span>
+                          <span className="text-[8px] text-zinc-600">Vol×{pick.vol_ratio?.toFixed(1)}</span>
+                          <span className="text-[8px] text-zinc-600">RSI {pick.rsi}</span>
+                        </div>
+                      </div>
+                      {/* PCR signal */}
+                      {pick.pcr_signal && pick.pcr_signal !== 'NEUTRAL' && (
+                        <div className="text-right">
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                            style={{ background: `${pcrColor}20`, color: pcrColor }}>
+                            {pick.pcr_signal.replace('STRONGLY_', 'S.').replace('_', ' ')}
+                          </span>
+                          <p className="text-[8px] text-zinc-600 mt-0.5">+{pick.pcr_boost}pts</p>
+                        </div>
+                      )}
+                      {/* Score */}
+                      <div className="text-right w-12">
+                        <p className="text-[11px] font-black" style={{ color: i === 0 ? '#ef4444' : '#9ca3af' }}>
+                          {pick.final_score?.toFixed(0)}
+                        </p>
+                        <p className="text-[8px] text-zinc-600">score</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Trade Explainability Log ──────────────────────────────────── */}
         <div className="bg-zinc-900/60 border border-zinc-800/50 rounded-2xl p-4">

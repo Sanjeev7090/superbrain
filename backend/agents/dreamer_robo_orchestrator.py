@@ -176,7 +176,7 @@ class RiskProfile:
         self.required_daily_return_pct = (target / cap) * 100.0
 
         # Risk per trade adjustments by tolerance
-        tol_mult = {"conservative": 0.6, "moderate": 1.0, "aggressive": 1.6}
+        tol_mult = {"conservative": 0.6, "moderate": 1.0, "aggressive": 1.6, "danger": 2.2}
         mult = tol_mult.get(tol, 1.0)
 
         self.risk_per_trade_pct = float(np.clip(
@@ -199,7 +199,7 @@ class RiskProfile:
         )
 
         # Max trades per day (scales with risk tolerance)
-        max_t_mult = {"conservative": 0.5, "moderate": 1.0, "aggressive": 1.5}
+        max_t_mult = {"conservative": 0.5, "moderate": 1.0, "aggressive": 1.5, "danger": 2.0}
         self.max_trades_per_day = max(1, int(MAX_TRADES_PER_DAY * max_t_mult.get(tol, 1.0)))
 
         # VaR 1-day 95% (parametric normal, assuming market_atr_pct as daily σ)
@@ -820,6 +820,10 @@ def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile
         if target_gap > 0 and prefs.daily_profit_target > 0:
             behind_frac  = min(target_gap / prefs.daily_profit_target, 1.0)
             behind_boost = 1.0 + behind_frac * 0.20  # up to 20% confidence boost
+
+        # Danger mode extra boost (F&O only — higher conviction needed)
+        if prefs.risk_tolerance == "danger":
+            behind_boost = min(behind_boost * 1.25, 1.5)
 
         effective_confidence = min(100, int(confidence * behind_boost))
 

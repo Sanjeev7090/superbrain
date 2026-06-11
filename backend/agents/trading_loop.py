@@ -324,6 +324,22 @@ class TradingLoop:
             # Sync engine max positions
             engine.set_max_positions(max_parallel)
 
+            # ── DANGER MODE: Override watchlist with F&O universe scan ────────
+            if getattr(prefs, 'risk_tolerance', 'moderate') == 'danger':
+                try:
+                    from .danger_scanner import run_danger_scan
+                    picks = run_danger_scan(top_n=max_parallel + 2)
+                    if picks:
+                        danger_tickers = [p["ticker"] for p in picks]
+                        logger.info(
+                            "[TradingLoop][%s] DANGER MODE — F&O scan picks: %s",
+                            cycle_id, danger_tickers[:max_parallel]
+                        )
+                        _upd(danger_picks=danger_tickers)
+                        watchlist = danger_tickers[:max_parallel + 2]
+                except Exception as _de:
+                    logger.warning("[TradingLoop][%s] Danger scan failed, using configured watchlist: %s", cycle_id, _de)
+
             # ── Step 5: Check ALL open positions (SL/TP) for ALL tickers ─────
             all_open_before = engine.get_open_positions()
             for pos in list(all_open_before):
