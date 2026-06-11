@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import logging
 import math
 import os
 import random
@@ -40,9 +41,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
+
+log = logging.getLogger("robo_router")
 
 from . import dreamer_robo_orchestrator as orch
 from .risk_portfolio_manager import (
@@ -277,6 +280,7 @@ async def get_status():
     """
     Full robo state: daily P&L progress, open trade, DreamerV3 decision,
     capital state vector, portfolio heat, and risk budget state.
+    Also includes Hybrid Brain active status (brain_active, brain_action, brain_fear).
     """
     state = orch.get_robo_state()
     s = dict(state)
@@ -293,6 +297,13 @@ async def get_status():
     if rpm.last_risk_budget:
         s["risk_budget"] = asdict(rpm.last_risk_budget)
 
+    # Attach Hybrid Brain status (set by trading loop each cycle)
+    s["brain_active"]     = state.get("brain_active", False)
+    s["brain_action"]     = state.get("brain_action", "HOLD")
+    s["brain_confidence"] = state.get("brain_confidence", 0.0)
+    s["brain_fear"]       = state.get("brain_fear", 0.0)
+    s["brain_regime"]     = state.get("brain_regime", "")
+
     return {"success": True, **s}
 
 
@@ -308,21 +319,71 @@ async def start_auto_mode(req: StartRequest):
       3. Resets daily P&L counters
       4. Starts APScheduler loop (scans every interval_minutes)
       5. First scan runs 5 seconds after start
+      6. Activates Hybrid Super Brain (warmup + initial decision in background)
 
     interval_minutes: 1–30 min. Default 5 min.
     DISCLAIMER: Starts in Paper Trading mode unless mode was changed via /api/robo/mode
     """
-    return orch.start_auto_mode(
+    result = orch.start_auto_mode(
         ticker           = req.ticker,
         interval_minutes = req.interval_minutes,
     )
+
+    # ── Activate Hybrid Brain in background ──────────────────────────────────
+    if result.get("success"):
+        import asyncio
+
+        async def _warmup_brain():
+            try:
+                from .hybrid_super_brain import hybrid_brain
+                from .dreamer_robo_orchestrator import _prefs, _upd
+                ticker = req.ticker or _prefs.ticker or "NIFTY"
+                symbol = ticker.replace(".NS", "").replace(".BO", "").upper()
+
+                # Load survival state from DB
+                await hybrid_brain.survival.load()
+
+                # Fire initial decision (populates cache + audit)
+                decision = await hybrid_brain.think_and_decide(
+                    market_data={},
+                    news="",
+                    symbol=symbol,
+                )
+                # ── Immediately reflect in robo state ────────────────────────
+                _upd(
+                    brain_active=True,
+                    brain_action=decision.get("action", "HOLD"),
+                    brain_confidence=decision.get("confidence", 0.0),
+                    brain_fear=decision.get("survival", {}).get("fear", 0.0),
+                    brain_regime=decision.get("psych", {}).get("regime", ""),
+                    brain_last_decision=decision,
+                )
+                log.info(
+                    "[AutoStart] Brain activated → %s @ %.1f%% conf | fear=%.2f",
+                    decision.get("action"), decision.get("confidence", 0),
+                    decision.get("survival", {}).get("fear", 0),
+                )
+            except Exception as e:
+                log.warning("[AutoStart] Brain warmup failed (non-fatal): %s", e)
+
+        asyncio.create_task(_warmup_brain())
+        result["brain_activated"] = True
+
+    return result
 
 
 # ─── 6. POST /stop ────────────────────────────────────────────────────────────
 @robo_router.post("/stop")
 async def stop_auto_mode():
     """Stop the autonomous trading loop."""
-    return orch.stop_auto_mode()
+    result = orch.stop_auto_mode()
+    # Mark brain as standby (still loaded, just not actively cycling)
+    try:
+        from .dreamer_robo_orchestrator import _upd
+        _upd(brain_active=False)
+    except Exception:
+        pass
+    return result
 
 
 # ─── 7. POST /reset-daily ─────────────────────────────────────────────────────

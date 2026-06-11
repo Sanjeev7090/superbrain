@@ -311,6 +311,22 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
           interval_minutes: intervalMin,
         });
         toast.success(res.data.message || 'Auto mode started');
+
+        // Activate Hybrid Brain in parallel (backend warmup may already be running,
+        // but also fire a manual initial decision so UI shows brain immediately)
+        setTimeout(async () => {
+          try {
+            const symbol = (settings.ticker || 'NIFTY').replace('.NS', '').replace('.BO', '');
+            const brRes = await axios.post(`${API}/hybrid-brain/decide`, { symbol });
+            setBrainDecision(brRes.data);
+            const auditRes = await axios.get(`${API}/hybrid-brain/audit?limit=10`);
+            if (auditRes.data?.decisions) setBrainAudit(auditRes.data.decisions);
+            toast.success(`Brain activated — ${brRes.data.action} @ ${brRes.data.confidence?.toFixed(1)}% conf`, {
+              icon: '🧠',
+              duration: 4000,
+            });
+          } catch { /* silent — brain is optional */ }
+        }, 2500);  // slight delay so backend warmup has a head start
       }
       await fetchAll();
     } catch (e) {
@@ -427,6 +443,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const status      = rs?.status || 'idle';
   const statusCfg   = STATUS_MAP[status] || STATUS_MAP.idle;
   const isActive    = rs?.auto_mode || false;
+  const isBrainActive = isActive && (rs?.brain_active || brainDecision != null);
   const dailyPnl    = rs?.daily_pnl || 0;
   const target      = rs?.daily_profit_target || settings.daily_profit_target || 1;
   const isDangerMode = settings.risk_tolerance === 'danger';
@@ -480,6 +497,17 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                     data-testid="danger-mode-badge"
                   >
                     DANGER · F&O
+                  </span>
+                )}
+                {/* Brain Active indicator — shows when auto mode running + brain fired */}
+                {isBrainActive && (
+                  <span
+                    className="text-[8px] font-black px-1.5 py-0.5 rounded-full animate-pulse ml-1 flex items-center gap-1"
+                    style={{ background: 'rgba(139,92,246,0.2)', color: '#c4b5fd', border: '1px solid rgba(139,92,246,0.4)' }}
+                    data-testid="brain-active-badge"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping inline-block" />
+                    BRAIN ON
                   </span>
                 )}
               </div>
@@ -629,6 +657,58 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
               onModeChange={handleModeChange}
               onSetInterval={handleSetInterval}
             />
+
+            {/* Brain live status strip — visible when auto mode running */}
+            {isActive && (
+              <div
+                className="mt-3 rounded-xl px-3 py-2 border flex items-center gap-3"
+                style={{ background: 'rgba(139,92,246,0.06)', borderColor: 'rgba(139,92,246,0.2)' }}
+                data-testid="brain-live-strip"
+              >
+                {/* Pulsing brain indicator */}
+                <div className="relative flex-shrink-0">
+                  <div
+                    className="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black"
+                    style={{ background: isBrainActive ? 'rgba(139,92,246,0.3)' : 'rgba(63,63,70,0.5)', color: isBrainActive ? '#c4b5fd' : '#52525b' }}
+                  >
+                    HSB
+                  </div>
+                  {isBrainActive && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-violet-400 animate-ping" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] font-bold" style={{ color: isBrainActive ? '#c4b5fd' : '#52525b' }}>
+                    {isBrainActive ? 'Hybrid Brain Active' : 'Brain Standby'}
+                  </p>
+                  {isBrainActive && brainDecision && (
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${
+                        brainDecision.action === 'BUY' ? 'bg-emerald-900/30 text-emerald-400'
+                        : brainDecision.action === 'SELL' ? 'bg-red-900/30 text-red-400'
+                        : 'bg-zinc-800 text-zinc-400'
+                      }`}>{brainDecision.action}</span>
+                      <span className="text-[8px] text-zinc-500">{brainDecision.confidence?.toFixed(0)}% conf</span>
+                      {brainDecision.survival?.fear > 0.3 && (
+                        <span className="text-[8px] text-amber-400">⚠ fear {(brainDecision.survival.fear * 100).toFixed(0)}%</span>
+                      )}
+                      <span className="text-[8px] text-purple-400/60">{brainDecision.psych?.regime}</span>
+                    </div>
+                  )}
+                </div>
+                {/* Manual fire button */}
+                <button
+                  onClick={handleBrainDecide}
+                  disabled={brainLoading}
+                  data-testid="brain-fire-mini-btn"
+                  className="text-[8px] px-2 py-1 rounded-lg font-bold transition-all disabled:opacity-50 shrink-0"
+                  style={{ background: 'rgba(139,92,246,0.15)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa' }}
+                >
+                  {brainLoading ? '⟳' : '⚡'}
+                </button>
+              </div>
+            )}
+
             {/* Reset daily */}
             <button
               onClick={handleResetDaily}

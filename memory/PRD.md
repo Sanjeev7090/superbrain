@@ -52,7 +52,26 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - ChartPanel.jsx massively upgraded: Supply/Demand Zones, Wyckoff Accumulation/Distribution,
   Manipulation (Stop Hunts), Refined Entry with SL/TGT dashed lines + R:R ratios
 
-### Phase 9 — Hybrid Super Brain v2 + Live P&L + Brain Visualization (Jun 2026)
+### Phase 10 — Danger Mode + Brain Auto-Activation (Jun 2026)
+- **Danger Mode (risk_tolerance = "danger")**:
+  - No direct equity trades — F&O universe only
+  - `danger_scanner.py`: 34 F&O tickers scored by momentum (5d return, vol spike, ATR, RSI)
+    + PCR parity boost (STRONGLY_BULLISH=+22, BULLISH=+14, BEARISH=-10, STRONGLY_BEARISH=-18)
+  - `GET /api/robo/danger-scan` endpoint returns top picks with pcr_signal, final_score, sector
+  - Trading loop auto-overrides watchlist with danger scan picks each cycle
+  - DreamerV3 gets +25% confidence boost in danger mode
+  - Frontend: 2×2 risk grid, red Danger card with skull SVG icon, "F&O ONLY" badge,
+    "Danger Mode Active" warning notice, "DANGER · F&O" header badge, F&O Picks panel
+- **Hybrid Brain Auto-Activation with Auto Start**:
+  - `POST /api/robo/start` fires `_warmup_brain()` as asyncio background task
+  - Warmup: loads survival state from MongoDB → `think_and_decide()` → updates `_state` immediately
+  - `_state` gets: `brain_active`, `brain_action`, `brain_confidence`, `brain_fear`, `brain_regime`
+  - `GET /api/robo/status` now returns all brain fields
+  - `POST /api/robo/stop` resets `brain_active=False`
+  - Trading loop: each cycle calls `hybrid_brain.decide_sync()`, applies brain-dreamer alignment boost
+    (+10 conf if agree) or fear circuit breaker (forced HOLD if fear > 0.70) or disagreement penalty (-15)
+  - Frontend: "BRAIN ON" pulsing badge in header when active, "Brain Live Strip" below start button
+    showing action/confidence/fear/regime, mini ⚡ button to re-fire manually
 - **Hybrid Super Brain v2 (`hybrid_super_brain.py` fully rewritten as central brain)**:
   - `MildSurvivalEngine` — MongoDB-persisted fear/boost scalar, grace period, overnight decay
   - `PsychologicalHarvester` — FOMO, Apathy, Regime, Narrative Credibility from real market data

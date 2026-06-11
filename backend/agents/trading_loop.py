@@ -276,6 +276,11 @@ class TradingLoop:
             market_open = self._is_market_open(now_ist)
             self._update_state("market_open", market_open)
 
+            # Keep brain active flag alive regardless of market hours
+            # (set by warmup task at start, refreshed each cycle when market open)
+            if _state.get("brain_active"):
+                self._update_state("brain_active", True)
+
             if not market_open:
                 logger.info("[TradingLoop][%s] Market closed (%s IST) — skipping",
                             cycle_id, now_ist.strftime("%H:%M %a"))
@@ -451,11 +456,61 @@ class TradingLoop:
                 # DreamerV3 decision
                 dreamer_dec = self._get_dreamer_decision_safe(prefs, risk)
 
-                # Meta decision
+                # ── Hybrid Brain sync on each cycle ──────────────────────────
+                brain_block = {}
+                try:
+                    from agents.hybrid_super_brain import hybrid_brain
+                    daily_pnl_pct = _state.get("daily_pnl", 0.0) / max(prefs.allocated_capital, 1.0)
+                    hybrid_brain.update_daily_pnl_sync(daily_pnl_pct)
+                    brain_block = hybrid_brain.decide_sync(
+                        market_data=ctx,
+                        symbol=ticker.replace(".NS", "").replace(".BO", "").upper(),
+                        dreamer_confidence=dreamer_dec.get("confidence", 60.0),
+                    )
+                    _upd(
+                        brain_active=True,
+                        brain_action=brain_block.get("action", "HOLD"),
+                        brain_confidence=brain_block.get("confidence", 0.0),
+                        brain_fear=brain_block.get("survival", {}).get("fear", 0.0),
+                        brain_regime=brain_block.get("psych", {}).get("regime", ""),
+                        brain_last_decision=brain_block,
+                    )
+                except Exception as _be:
+                    logger.debug("[TradingLoop][%s] Brain sync failed: %s", cycle_id, _be)
+
+                # Meta decision (brain-aware)
                 meta = self._compute_meta_decision(dreamer_dec, ctx, risk_profile)
 
+                # ── Brain override logic ──────────────────────────────────────
+                # If brain and dreamer agree → boost confidence
+                # If brain vetoes (HOLD, high fear) → downgrade signal
+                if brain_block:
+                    brain_action = brain_block.get("action", "HOLD")
+                    brain_conf   = brain_block.get("confidence", 50.0)
+                    brain_fear   = brain_block.get("survival", {}).get("fear", 0.0)
+                    meta_signal  = meta.get("signal", "HOLD")
+                    meta_conf    = meta.get("confidence", 0)
+
+                    # Alignment boost: both agree → +10% confidence
+                    if brain_action == meta_signal and meta_signal != "HOLD":
+                        boosted_conf = min(100, meta_conf + 10)
+                        meta = {**meta, "confidence": boosted_conf, "brain_boost": True}
+                    # Fear circuit: brain fear > 0.7 → force HOLD
+                    elif brain_fear > 0.70:
+                        meta = {**meta, "signal": "HOLD", "confidence": 0,
+                                "brain_override": f"HOLD — brain fear {brain_fear:.2f}"}
+                        logger.info("[TradingLoop][%s] Brain fear=%.2f → forced HOLD for %s",
+                                    cycle_id, brain_fear, ticker)
+                    # Disagreement: brain says opposite → reduce confidence by 15%
+                    elif brain_action != "HOLD" and brain_action != meta_signal:
+                        reduced_conf = max(0, meta_conf - 15)
+                        meta = {**meta, "confidence": reduced_conf, "brain_disagree": True}
+
                 _upd(
-                    current_decision    = {**dreamer_dec, "meta": meta, "ticker": ticker},
+                    current_decision    = {
+                        **dreamer_dec, "meta": meta, "ticker": ticker,
+                        "brain": brain_block,
+                    },
                     dreamer_signal      = dreamer_dec.get("direction", 0.0),
                     dreamer_confidence  = dreamer_dec.get("confidence", 0),
                     dreamer_weights     = dreamer_dec.get("strategy_weights", {}),
