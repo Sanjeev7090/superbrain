@@ -211,7 +211,7 @@ OPENAI_API_KEY=sk-proj-[your-key]
 
 ### Frontend Environment (.env)
 ```
-REACT_APP_BACKEND_URL=https://survival-brain-v3.preview.emergentagent.com
+REACT_APP_BACKEND_URL=https://hybrid-robo.preview.emergentagent.com
 WDS_SOCKET_PORT=443
 ENABLE_HEALTH_CHECK=false
 ```
