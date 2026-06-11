@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { X, ArrowsClockwise, ChartLine, Lightning, CaretUp, CaretDown } from '@phosphor-icons/react';
 
@@ -127,6 +127,8 @@ const DeltaDashScoreboard = ({ onClose, onSelectStock }) => {
   const [error, setError]         = useState(null);
   const [sortCol, setSortCol]     = useState('total');
   const [sortAsc, setSortAsc]     = useState(false);
+  const [liveMode, setLiveMode]   = useState(false);
+  const liveTimerRef              = useRef(null);
 
   const runScan = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -143,6 +145,23 @@ const DeltaDashScoreboard = ({ onClose, onSelectStock }) => {
       setLoading(false);
     }
   }, []);
+
+  // Live mode: refresh every 60s
+  useEffect(() => {
+    if (liveTimerRef.current) clearInterval(liveTimerRef.current);
+    if (liveMode) {
+      liveTimerRef.current = setInterval(() => runScan(true), 60_000);
+    }
+    return () => { if (liveTimerRef.current) clearInterval(liveTimerRef.current); };
+  }, [liveMode, runScan]);
+
+  // Auto-refresh every 5 min passively
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!liveMode) runScan(true);
+    }, 300_000);
+    return () => clearInterval(t);
+  }, [liveMode, runScan]);
 
   const handleRowSelect = useCallback((row) => {
     if (onSelectStock) {
@@ -236,6 +255,20 @@ const DeltaDashScoreboard = ({ onClose, onSelectStock }) => {
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <Legend />
+            {/* Live toggle */}
+            <button
+              onClick={() => setLiveMode(p => !p)}
+              data-testid="dd-live-btn"
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition border ${
+                liveMode
+                  ? 'bg-emerald-600/30 border-emerald-500/60 text-emerald-300'
+                  : 'border-white/10 text-slate-500 hover:text-white hover:bg-white/8'
+              }`}
+              title={liveMode ? 'Live: refreshes every 60s' : 'Enable Live mode'}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${liveMode ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'}`} />
+              LIVE
+            </button>
             <button
               onClick={() => runScan(true)}
               disabled={loading}
@@ -258,7 +291,7 @@ const DeltaDashScoreboard = ({ onClose, onSelectStock }) => {
                 <span className="text-2xl font-black text-indigo-400">dd</span>
               </div>
               <p className="text-sm font-semibold">Click <strong>Scan Now</strong> to load the scoreboard</p>
-              <p className="text-xs text-slate-500">Scores {INDICES.length + 40}+ symbols across 6 timeframes</p>
+              <p className="text-xs text-slate-500">Scores 44+ symbols across 6 timeframes</p>
               <button
                 onClick={() => runScan(false)}
                 className="mt-2 px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition"
