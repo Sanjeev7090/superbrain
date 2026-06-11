@@ -305,7 +305,7 @@ const DeltaDashScoreboard = ({ onClose, onSelectStock }) => {
           {loading && (
             <div className="flex flex-col items-center justify-center h-64 text-slate-400 gap-3">
               <ArrowsClockwise size={40} className="animate-spin text-indigo-400" />
-              <p className="text-sm">Scanning {INDICES.length + 40}+ symbols across 6 timeframes…</p>
+              <p className="text-sm">Scanning 44+ symbols across 6 timeframes…</p>
               <p className="text-xs text-slate-500">This may take 30-60 seconds</p>
             </div>
           )}
