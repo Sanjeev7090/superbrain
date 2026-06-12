@@ -99,6 +99,11 @@ class TradingLoop:
         self._eod_closed:   bool  = False   # tracks if EOD close ran today
         self._today_str:    str   = ""      # "YYYY-MM-DD" for EOD reset detection
 
+        # ── Live Training: per-ticker last obs + action cache ──────────────────
+        self._live_last_obs:    Dict[str, np.ndarray] = {}   # ticker → last obs vec
+        self._live_last_action: Dict[str, np.ndarray] = {}   # ticker → last action
+        self._live_last_price:  Dict[str, float]      = {}   # ticker → last price
+
         # State exposed to orchestrator + API
         self._loop_state: Dict = {
             "running":           False,
@@ -599,6 +604,50 @@ class TradingLoop:
                 else:
                     logger.info("[TradingLoop][%s] %s HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
                                 cycle_id, ticker, signal, confidence, conf_floor)
+
+                # ── Live DreamerV3 Experience Push ────────────────────────────
+                # Build obs from current market context and push to dreamer's
+                # replay buffer so it can learn from REAL market observations.
+                try:
+                    from rl_agent.dreamer_trainer import push_live_experience, build_live_obs
+                    cur_obs = build_live_obs(
+                        ctx,
+                        position=(1.0 if signal == "BUY" else -1.0 if signal == "SELL" else 0.0),
+                        entry_price=self._live_last_price.get(ticker, live_price),
+                        capital_health=min(1.0, max(0.1,
+                            1.0 - _state.get("daily_pnl", 0.0) / max(prefs.allocated_capital, 1.0))),
+                        strategy_weights=list(dreamer_dec.get("strategy_weights", {}).values())[:12]
+                            if dreamer_dec.get("strategy_weights") else None,
+                    )
+
+                    # Map signal → action vector (dim 12: signal in dim-12 slot)
+                    live_action = np.zeros(16, dtype=np.float32)
+                    live_action[12] = (1.0 if signal == "BUY" else -1.0 if signal == "SELL" else 0.0)
+                    live_action[13] = 0.5   # SL ATR mid
+                    live_action[14] = 0.5   # TP ATR mid
+                    live_action[15] = confidence / 100.0  # exposure = confidence
+
+                    # Compute reward proxy: conf × direction alignment with context
+                    regime = ctx.get("regime", "UNKNOWN")
+                    direction_ok = (
+                        (signal == "BUY"  and regime == "UPTREND") or
+                        (signal == "SELL" and regime == "DOWNTREND")
+                    )
+                    live_reward = (confidence / 100.0) * (1.0 if direction_ok else -0.5)
+
+                    # If we had a last obs for this ticker → push full transition
+                    last_obs = self._live_last_obs.get(ticker)
+                    if last_obs is not None:
+                        push_live_experience(ticker, last_obs, live_action,
+                                             live_reward, cur_obs, done=0.0)
+
+                    # Always update "last" state for this ticker
+                    self._live_last_obs[ticker]    = cur_obs
+                    self._live_last_action[ticker] = live_action
+                    self._live_last_price[ticker]  = live_price
+
+                except Exception as _le:
+                    logger.debug("[LiveTrain] push failed for %s: %s", ticker, _le)
 
             # If no new entries and no current trades → scanning status
             final_open = engine.get_open_positions()

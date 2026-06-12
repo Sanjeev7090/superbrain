@@ -38,9 +38,10 @@ try:
     _PER_AVAILABLE = True
 except ImportError:
     _PER_AVAILABLE = False
-    logger.warning("PER / RiskReward modules not available — using uniform replay")
 
 logger = logging.getLogger(__name__)
+if not _PER_AVAILABLE:
+    logger.warning("PER / RiskReward modules not available — using uniform replay")
 
 MODELS_DIR = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
@@ -122,6 +123,22 @@ _continuous_thread: threading.Thread = None
 _rr_engine = None         # RiskAdjustedRewardEngine or None
 _rr_state:  Dict = {}     # latest reward breakdown
 
+# ─── Live Experience Buffer (Online Learning from active trade tickers) ────────
+import collections as _collections
+_LIVE_EXP_MAXLEN = 2000      # rolling window of live experiences
+_live_exp_deque: _collections.deque = _collections.deque(maxlen=_LIVE_EXP_MAXLEN)
+_live_exp_lock  = threading.Lock()
+_live_agent     = None       # global DreamerV3Agent reused for live mini-training
+_live_agent_lock = threading.Lock()
+
+# ─── State additions for live training ────────────────────────────────────────
+_state.update({
+    "live_exp_count":    0,    # total live experiences pushed
+    "live_train_steps":  0,    # mini-training steps from live data
+    "live_wm_loss":      0.0,  # latest world-model loss from live mini-train
+    "live_tickers":      [],   # which tickers sent live data this session
+})
+
 
 def _upd(**kw):
     with _lock:
@@ -134,7 +151,202 @@ def get_state() -> Dict:
         return dict(_state)
 
 
-# ─── DreamerV3 Components ─────────────────────────────────────────────────────
+# ─── Live Experience API ───────────────────────────────────────────────────────
+
+def build_live_obs(ctx: Dict, position: float = 0.0, entry_price: float = 0.0,
+                   capital_health: float = 1.0, strategy_weights: List[float] = None) -> np.ndarray:
+    """
+    Build a 38-dim observation vector from a live market context dict.
+    Matches the TradingEnv._obs() schema so experiences are compatible
+    with the trained world model.
+    """
+    price = float(ctx.get("price", 0.0)) or 1.0
+    rsi   = float(ctx.get("rsi14", 50.0))
+    atr   = float(ctx.get("atr14",  price * 0.01))
+    atr_p = float(ctx.get("atr_pct", 0.015))
+    vol_r = float(ctx.get("vol_ratio", 1.0))
+    chg_p = float(ctx.get("change_pct", 0.0)) / 100.0
+    regime_str = ctx.get("regime", "UNKNOWN")
+    regime_enc = (1.0 if regime_str == "UPTREND" else
+                  -1.0 if regime_str == "DOWNTREND" else 0.0)
+
+    # OHLCV proxies (we only have close + ATR from live context)
+    close_z = 0.0   # centred — we don't have rolling mean in live
+    open_z  = -chg_p
+    high_z  = atr_p
+    low_z   = -atr_p
+    vol_z   = np.log1p(max(vol_r, 0)) / 10.0
+
+    # Technical features
+    rsi_z    = (rsi - 50.0) / 50.0
+    macd_z   = chg_p * 10.0           # proxy
+    macd_s_z = chg_p * 5.0
+    bb_pct   = np.clip((rsi - 30.0) / 40.0, -1.0, 1.0)
+    atr_z    = atr / (price + 1e-8)
+    ema20_z  = chg_p * 2.0
+    sma50_z  = chg_p
+    price_chg = chg_p
+    vol20    = atr_p
+    mom5     = chg_p * 5.0
+
+    # Strategy weights (12-dim)
+    sw = strategy_weights if (strategy_weights and len(strategy_weights) == 12) else [1.0 / 12] * 12
+
+    # Position state
+    unreal = 0.0
+    if position != 0 and entry_price > 0:
+        unreal = (price - entry_price) / (entry_price + 1e-8) * position
+
+    total_ret   = capital_health - 1.0
+    drawdown    = max(0.0, 1.0 - capital_health)
+    overbought  = (1.0 if rsi > 70 else -1.0 if rsi < 30 else 0.0)
+    sl_dist     = atr_p * 2.0
+
+    obs = np.array([
+        close_z, open_z, high_z, low_z, vol_z,           # 5
+        rsi_z, macd_z, macd_s_z, bb_pct, atr_z,          # 5
+        ema20_z, sma50_z, price_chg, vol20, mom5,          # 5  → 15
+        *sw,                                               # 12 → 27
+        position,                                          # 1
+        unreal,                                            # 1
+        0.0,                                               # days_held / 30
+        total_ret,                                         # 1
+        -drawdown,                                         # 1
+        0.5,                                               # intra-episode progress proxy
+        capital_health - 1.0,                              # 1
+        overbought,                                        # 1  → 35
+        regime_enc,                                        # 1  → 36
+        capital_health,                                    # 1  → 37 equity health
+        sl_dist,                                           # 1  → 38
+    ], dtype=np.float32)
+
+    return np.clip(obs[:38], -10.0, 10.0)
+
+
+def push_live_experience(
+    ticker:     str,
+    obs:        np.ndarray,
+    action:     np.ndarray,
+    reward:     float,
+    next_obs:   np.ndarray,
+    done:       float = 0.0,
+    kronos_feat: np.ndarray = None,
+) -> Dict:
+    """
+    Push one live market experience into the training pipeline.
+    Called from the trading loop after each ticker scan cycle so
+    DreamerV3 can learn from real market observations in real-time.
+
+    • Experience is always buffered (thread-safe deque).
+    • If DreamerV3 is currently training, it drains the deque automatically.
+    • If DreamerV3 is in 'running' / 'paused' state, a mini-training step
+      is triggered here (world-model only, no episode reset needed).
+    """
+    global _per_buffer, _live_agent
+
+    # ── Ensure action is proper shape ────────────────────────────────────────
+    if not isinstance(action, np.ndarray):
+        action = np.array(action, dtype=np.float32)
+    if action.ndim == 0:
+        action = np.full(16, float(action), dtype=np.float32)
+    if len(action) < 16:
+        action = np.pad(action, (0, 16 - len(action)), constant_values=0.0)
+    action = action[:16].astype(np.float32)
+
+    kf = kronos_feat if kronos_feat is not None else np.zeros(128, dtype=np.float32)
+
+    with _live_exp_lock:
+        _live_exp_deque.append((
+            obs.astype(np.float32),
+            action,
+            float(reward),
+            next_obs.astype(np.float32),
+            float(done),
+            kf,
+        ))
+        exp_count = len(_live_exp_deque)
+
+    # Track which tickers are sending live data
+    with _lock:
+        tickers = list(_state.get("live_tickers", []))
+        if ticker not in tickers:
+            tickers.append(ticker)
+        _state["live_tickers"]  = tickers[-20:]   # keep last 20
+        _state["live_exp_count"] = _state.get("live_exp_count", 0) + 1
+
+    # ── Push into PER buffer if available ────────────────────────────────────
+    with _per_lock:
+        if _per_buffer is None and _PER_AVAILABLE:
+            _per_buffer = PrioritizedReplayBuffer(capacity=100_000)
+        buf = _per_buffer
+
+    if buf is not None:
+        buf.push(obs, action, float(reward), next_obs, float(done), kronos_feat=kf)
+
+    # ── Mini-training step if we have enough data ─────────────────────────────
+    status = _state.get("status", "idle")
+    if buf is not None and len(buf) >= BATCH_SIZE and status in ("running", "paused"):
+        _trigger_live_mini_train(buf)
+
+    logger.debug("[LiveExp] ticker=%s exp#%d reward=%.4f buf_size=%d",
+                 ticker, _state.get("live_exp_count", 0), reward,
+                 len(buf) if buf else exp_count)
+    return {"pushed": True, "exp_count": _state.get("live_exp_count", 0)}
+
+
+def _trigger_live_mini_train(buf):
+    """Run one mini world-model + actor-critic update from the shared buffer."""
+    global _live_agent
+    try:
+        # Reuse or create agent
+        with _live_agent_lock:
+            if _live_agent is None:
+                _live_agent = DreamerV3Agent()
+                # Try to load latest saved model
+                model_files = sorted(
+                    [f for f in os.listdir(str(MODELS_DIR)) if f.startswith("dreamer_") and f.endswith(".pt")],
+                    key=lambda f: os.path.getmtime(str(MODELS_DIR / f)),
+                    reverse=True,
+                )
+                if model_files:
+                    try:
+                        _live_agent.load(str(MODELS_DIR / model_files[0]))
+                    except Exception:
+                        pass
+            agent = _live_agent
+
+        batch = buf.sample(BATCH_SIZE)
+        if len(batch) == 8:   # PER batch
+            obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b, _, _ = batch
+        else:
+            obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b = batch
+
+        with _live_agent_lock:
+            wm_l = agent.update_world_model((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+            a_l, c_l = agent.update_actor_critic((obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b))
+
+        steps = _state.get("live_train_steps", 0) + 1
+        _upd(
+            live_train_steps=steps,
+            live_wm_loss=round(float(wm_l), 6),
+        )
+
+        # Save periodically (every 50 live steps)
+        if steps % 50 == 0:
+            ticker_key = (_state.get("ticker") or "RELIANCE_NS").replace(".", "_")
+            model_path = str(MODELS_DIR / f"dreamer_{ticker_key}.pt")
+            try:
+                with _live_agent_lock:
+                    agent.save(model_path)
+                logger.info("[LiveTrain] Saved model after %d live steps", steps)
+            except Exception as _se:
+                logger.debug("[LiveTrain] Save failed: %s", _se)
+
+    except Exception as exc:
+        logger.debug("[LiveTrain] Mini-train step failed: %s", exc)
+
+
+
 
 class ObsEncoder(nn.Module):
     """
@@ -837,6 +1049,16 @@ def _train_worker(mode: str, ticker: str, timesteps: int):
             trade_sig = info.get("trade_signal",     0.0)
             tot_ret   = info.get("total_return",     0.0)
             drawdn    = info.get("drawdown",         0.0)
+
+            # ── Drain live experience buffer into training buffer ──
+            with _live_exp_lock:
+                live_batch = list(_live_exp_deque)
+                _live_exp_deque.clear()
+            for lv_exp in live_batch:
+                replay.push(*lv_exp)
+            if live_batch:
+                logger.info("[LiveTrain] Drained %d live experiences into replay buffer (size=%d)",
+                            len(live_batch), len(replay))
 
             _upd(
                 episode=episode,

@@ -512,6 +512,8 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const dailyPnl    = rs?.daily_pnl || 0;
   const target      = rs?.daily_profit_target || settings.daily_profit_target || 1;
   const isDangerMode = settings.risk_tolerance === 'danger';
+  const lt          = rs?.live_training || {};
+  const isLiveTraining = isActive && (lt.exp_count > 0 || lt.train_steps > 0);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -550,6 +552,17 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                   >
                     <span className="w-1 h-1 rounded-full bg-violet-400 animate-ping inline-block" />
                     AI
+                  </span>
+                )}
+                {isLiveTraining && (
+                  <span
+                    className="text-[7px] font-black px-1 py-px rounded flex items-center gap-0.5"
+                    style={{ background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)' }}
+                    data-testid="live-train-badge"
+                    title={`Live Training: ${lt.exp_count} exp | ${lt.train_steps} steps | WM loss ${lt.wm_loss?.toFixed?.(4) || '—'}`}
+                  >
+                    <span className="w-1 h-1 rounded-full bg-emerald-400 animate-ping inline-block" />
+                    EVOLVING
                   </span>
                 )}
               </div>
@@ -818,6 +831,71 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
             >
               Reset Daily Counters
             </button>
+
+            {/* ── Live DreamerV3 Training Stats ──────────────────────────── */}
+            {isActive && (
+              <div
+                className="mt-2 rounded-xl px-3 py-2 border"
+                style={{
+                  background: isLiveTraining ? 'rgba(16,185,129,0.06)' : 'rgba(24,24,27,0.4)',
+                  borderColor: isLiveTraining ? 'rgba(16,185,129,0.25)' : 'rgba(63,63,70,0.35)',
+                }}
+                data-testid="live-training-panel"
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">
+                      DreamerV3 · Live Training
+                    </span>
+                    {isLiveTraining && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    )}
+                  </div>
+                  <span
+                    className="text-[8px] font-bold px-1.5 py-px rounded"
+                    style={{
+                      background: isLiveTraining ? 'rgba(16,185,129,0.15)' : 'rgba(63,63,70,0.3)',
+                      color: isLiveTraining ? '#34d399' : '#52525b',
+                    }}
+                  >
+                    {isLiveTraining ? 'EVOLVING' : 'STANDBY'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { l: 'Experiences', v: lt.exp_count?.toLocaleString() || '0', c: '#34d399' },
+                    { l: 'Train Steps',  v: lt.train_steps?.toLocaleString() || '0', c: '#60a5fa' },
+                    { l: 'WM Loss',      v: lt.wm_loss ? lt.wm_loss.toFixed(4) : '—', c: '#f59e0b' },
+                    { l: 'Tickers',      v: lt.tickers?.length || 0, c: '#a78bfa' },
+                  ].map(({ l, v, c }) => (
+                    <div key={l} className="rounded-lg p-1.5 text-center" style={{ background: 'rgba(24,24,27,0.6)' }}>
+                      <p className="text-[8px] text-zinc-600 mb-0.5">{l}</p>
+                      <p className="text-[10px] font-black" style={{ color: c }}>{v}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {lt.tickers?.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {lt.tickers.slice(0, 6).map(t => (
+                      <span key={t} className="text-[7px] font-mono px-1 py-px rounded bg-zinc-800 text-zinc-400">
+                        {t.replace('.NS', '')}
+                      </span>
+                    ))}
+                    {lt.tickers.length > 6 && (
+                      <span className="text-[7px] text-zinc-600">+{lt.tickers.length - 6} more</span>
+                    )}
+                  </div>
+                )}
+
+                {!isLiveTraining && (
+                  <p className="text-[8px] text-zinc-600 mt-1">
+                    Live market data from active stocks will train DreamerV3 when auto mode runs
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Agent status */}

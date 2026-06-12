@@ -304,6 +304,20 @@ async def get_status():
     s["brain_fear"]       = state.get("brain_fear", 0.0)
     s["brain_regime"]     = state.get("brain_regime", "")
 
+    # Attach live DreamerV3 training stats
+    try:
+        from rl_agent.dreamer_trainer import get_state as _rl_state
+        rs = _rl_state()
+        s["live_training"] = {
+            "exp_count":    rs.get("live_exp_count", 0),
+            "train_steps":  rs.get("live_train_steps", 0),
+            "wm_loss":      rs.get("live_wm_loss", 0.0),
+            "tickers":      rs.get("live_tickers", []),
+            "dreamer_status": rs.get("status", "idle"),
+        }
+    except Exception:
+        s["live_training"] = {"exp_count": 0, "train_steps": 0, "wm_loss": 0.0, "tickers": [], "dreamer_status": "idle"}
+
     return {"success": True, **s}
 
 
