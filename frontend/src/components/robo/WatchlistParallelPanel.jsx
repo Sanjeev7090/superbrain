@@ -11,8 +11,8 @@
  * Data source: roboState.watchlist_observations (populated by trading loop Phase A)
  */
 
-import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, Eye, Activity } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, ChevronRight, Eye, Activity, Cpu } from 'lucide-react';
 
 const fmt2 = v => v == null ? '—' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtPct = v => v == null ? '—' : `${Number(v).toFixed(1)}%`;
@@ -87,7 +87,7 @@ function TickerRow({ ticker, obs, isExpanded, onToggle, isTraining }) {
         </span>
 
         {/* Ticker symbol */}
-        <span className="text-[11px] font-black text-white w-[64px] flex-shrink-0 font-mono">
+        <span className="text-[11px] font-black text-white w-[60px] flex-shrink-0 font-mono">
           {symbol}
         </span>
 
@@ -99,26 +99,35 @@ function TickerRow({ ticker, obs, isExpanded, onToggle, isTraining }) {
           {sCfg.icon} {sig}
         </span>
 
+        {/* Live DreamerV3 Confidence badge */}
+        <span
+          className="text-[8px] font-black px-1.5 py-0.5 rounded flex-shrink-0 flex items-center gap-0.5"
+          style={{
+            background: 'rgba(99,102,241,0.12)',
+            border: '1px solid rgba(99,102,241,0.3)',
+            color: obs.dreamer_conf > 60 ? '#a5b4fc' : obs.dreamer_conf > 40 ? '#818cf8' : '#6366f1',
+            minWidth: '44px',
+            justifyContent: 'center',
+          }}
+          data-testid={`dv3-conf-${symbol}`}
+          title="Live DreamerV3 Confidence"
+        >
+          <Cpu size={7} className="flex-shrink-0" />
+          {obs.dreamer_conf != null ? `${Math.round(obs.dreamer_conf)}%` : '—'}
+        </span>
+
         {/* Confidence bar + pct */}
         <div className="flex-1 min-w-0 flex flex-col gap-0.5">
           <ConfBar pct={conf} signal={sig} />
         </div>
-        <span className="text-[9px] font-bold w-[30px] text-right flex-shrink-0"
+        <span className="text-[9px] font-bold w-[28px] text-right flex-shrink-0"
           style={{ color: sCfg.text }}>
           {conf.toFixed(0)}%
         </span>
 
         {/* Price */}
-        <span className="text-[10px] font-mono text-zinc-300 w-[56px] text-right flex-shrink-0">
+        <span className="text-[10px] font-mono text-zinc-300 w-[52px] text-right flex-shrink-0">
           {obs.price ? `₹${fmt2(obs.price)}` : '—'}
-        </span>
-
-        {/* Regime */}
-        <span
-          className="text-[8px] font-bold w-[68px] text-right flex-shrink-0 hidden sm:block"
-          style={{ color: rColor }}
-        >
-          {obs.regime || '—'}
         </span>
 
         {/* Status: IN POSITION or WATCHING or TRAINING */}
@@ -314,12 +323,12 @@ export default function WatchlistParallelPanel({ roboState, isActive }) {
       {/* Column headers */}
       <div className="flex items-center gap-2.5 px-3 py-1.5 border-b border-zinc-800/30">
         <span className="text-[7px] text-zinc-700 uppercase w-[11px]" />
-        <span className="text-[7px] text-zinc-700 uppercase w-[64px]">Ticker</span>
+        <span className="text-[7px] text-zinc-700 uppercase w-[60px]">Ticker</span>
         <span className="text-[7px] text-zinc-700 uppercase w-[40px]">Signal</span>
-        <span className="text-[7px] text-zinc-700 uppercase flex-1">Confidence</span>
-        <span className="text-[7px] text-zinc-700 uppercase w-[30px] text-right">%</span>
-        <span className="text-[7px] text-zinc-700 uppercase w-[56px] text-right">Price</span>
-        <span className="text-[7px] text-zinc-700 uppercase w-[68px] text-right hidden sm:block">Regime</span>
+        <span className="text-[7px] text-zinc-600 uppercase w-[44px]" style={{ color: 'rgba(99,102,241,0.6)' }}>DV3 Conf</span>
+        <span className="text-[7px] text-zinc-700 uppercase flex-1">Strength</span>
+        <span className="text-[7px] text-zinc-700 uppercase w-[28px] text-right">%</span>
+        <span className="text-[7px] text-zinc-700 uppercase w-[52px] text-right">Price</span>
         <span className="text-[7px] text-zinc-700 uppercase w-[42px] text-right">Status</span>
       </div>
 
