@@ -57,6 +57,7 @@ import SectorTrending from './SectorTrending';
 import SectorStocksSheet from './SectorStocksSheet';
 import TopMoversWidget from './TopMoversWidget';
 import MonteCarloPanel from './robo/MonteCarloPanel';
+import MinerviniVCPPanel from './MinerviniVCPPanel';
 import { Toaster, toast } from 'sonner';
 import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -880,6 +881,18 @@ const TradingDashboard = () => {
                     <p className="text-slate-400 dark:text-zinc-500 text-sm">Select a stock or crypto to view strategies</p>
                   </div>
                 )}
+
+                {/* ── Top Trader Concepts ───────────────────────────────── */}
+                <div className="pt-1">
+                  {/* Section header */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800/60" style={{ background: 'rgba(234,179,8,0.03)' }}>
+                    <div className="w-1 h-4 rounded-full bg-yellow-500" />
+                    <span className="text-[10px] font-black text-yellow-500 uppercase tracking-widest">Top Trader Concepts</span>
+                  </div>
+                  <div className="p-2 space-y-2">
+                    <MinerviniVCPPanel selectedStock={selectedStock} />
+                  </div>
+                </div>
               </div>
             )}
 

@@ -9203,6 +9203,52 @@ async def analyze_hybrid_vwap(request: HybridVWAPRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ======================= MINERVINI VCP SCANNER =======================
+
+class MinerviniVCPRequest(BaseModel):
+    ticker: str
+
+@api_router.post("/strategy/minervini-vcp")
+async def analyze_minervini_vcp(request: MinerviniVCPRequest):
+    """
+    Mark Minervini VCP (Volatility Contraction Pattern) scanner.
+    Fetches 300 days of daily OHLCV from yfinance and runs the scanner.
+    """
+    try:
+        from agents.minervini_vcp import MinerviniVCPScanner
+        ticker = request.ticker.upper().strip()
+
+        # Fetch daily OHLCV — need 200+ rows
+        stock = yf.Ticker(ticker)
+        raw = stock.history(period="300d", interval="1d", auto_adjust=True)
+        if raw is None or len(raw) < 200:
+            raise HTTPException(status_code=400, detail=f"Not enough data for {ticker} (need 200+ daily bars)")
+
+        df = raw.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                                  "Close": "close", "Volume": "volume"})
+        df = df[["open", "high", "low", "close", "volume"]].copy()
+        df = df.dropna()
+
+        # Nifty as market benchmark
+        market_df = None
+        try:
+            nifty_raw = yf.Ticker("^NSEI").history(period="300d", interval="1d", auto_adjust=True)
+            if nifty_raw is not None and len(nifty_raw) >= 20:
+                market_df = nifty_raw.rename(columns={"Close": "close"})[["close"]].dropna()
+        except Exception:
+            pass
+
+        scanner = MinerviniVCPScanner()
+        result  = scanner.analyze_stock(df, ticker, market_df=market_df)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Minervini VCP error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ======================= NARRATIVE SWING BACKTEST =======================
 
 def _bt_narrative_swing(closes, highs, lows, dates, max_exit=5,
