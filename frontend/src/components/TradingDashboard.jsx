@@ -550,6 +550,7 @@ const TradingDashboard = () => {
     { id: 'ensemble',   label: 'AI ASSEMBLE', shortLabel: 'AI ASM'  },
     { id: 'picker',     label: 'PICKER',      shortLabel: 'PICK'    },
     { id: 'pece',       label: 'PE-CE OI',    shortLabel: 'PE-CE'   },
+    { id: 'toptraders', label: 'TOP TRADERS', shortLabel: 'TRADERS' },
   ];
 
   const leftTabs = [
@@ -883,18 +884,6 @@ const TradingDashboard = () => {
                   </div>
                 )}
 
-                {/* ── Top Trader Concepts ───────────────────────────────── */}
-                <div className="pt-1">
-                  {/* Section header */}
-                  <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800/60" style={{ background: 'rgba(234,179,8,0.03)' }}>
-                    <div className="w-1 h-4 rounded-full bg-yellow-500" />
-                    <span className="text-[10px] font-black text-yellow-500 uppercase tracking-widest">Top Trader Concepts</span>
-                  </div>
-                  <div className="p-2 space-y-2">
-                    <MinerviniVCPPanel selectedStock={selectedStock} />
-                    <LivermorePivotalPanel selectedStock={selectedStock} />
-                  </div>
-                </div>
               </div>
             )}
 
@@ -940,6 +929,20 @@ const TradingDashboard = () => {
 
             {activeTab === 'pece' && (
               <PECETracker />
+            )}
+
+            {activeTab === 'toptraders' && (
+              <div className="divide-y divide-zinc-800/60">
+                {/* Header */}
+                <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: 'rgba(234,179,8,0.04)' }}>
+                  <div className="w-1 h-4 rounded-full bg-yellow-500" />
+                  <span className="text-[10px] font-black text-yellow-400 uppercase tracking-widest">Top Trader Concepts</span>
+                </div>
+                <div className="p-2 space-y-2">
+                  <MinerviniVCPPanel selectedStock={selectedStock} />
+                  <LivermorePivotalPanel selectedStock={selectedStock} />
+                </div>
+              </div>
             )}
             {activeTab === 'quant' && (
               <div className="space-y-0">
