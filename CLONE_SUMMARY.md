@@ -211,7 +211,7 @@ OPENAI_API_KEY=sk-proj-[your-key]
 
 ### Frontend Environment (.env)
 ```
-REACT_APP_BACKEND_URL=https://dreamer-watchlist-ai.preview.emergentagent.com
+REACT_APP_BACKEND_URL=https://brain-replica-3.preview.emergentagent.com
 WDS_SOCKET_PORT=443
 ENABLE_HEALTH_CHECK=false
 ```
