@@ -170,3 +170,18 @@ async def toggle_brain(body: dict = {}):
 async def audit(limit: int = Query(50, ge=1, le=200)):
     rows = await hybrid_brain.get_recent_audit(limit=limit)
     return {"count": len(rows), "decisions": rows}
+
+
+@router.get("/layer-evolution")
+async def layer_evolution_state():
+    """Robot 3.0 Layer Evolution — trust scores, coefficients, recent events."""
+    from .layer_evolution import layer_evolution
+    return layer_evolution.get_full_state()
+
+
+@router.post("/layer-evolution/reset")
+async def layer_evolution_reset():
+    """Reset all layer trust scores back to 0.50 (base coefficients)."""
+    from .layer_evolution import layer_evolution
+    layer_evolution.reset()
+    return {"success": True, **layer_evolution.get_full_state()}

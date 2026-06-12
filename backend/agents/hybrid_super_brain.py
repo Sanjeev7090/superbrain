@@ -430,19 +430,29 @@ class HybridSuperBrain:
         meta: Dict,
         survival: Dict,
     ) -> Dict[str, Any]:
-        fomo_boost   = psych["fomo_score"] * 12.0
-        apathy_drag  = psych["apathy_score"] * 5.0
-        fear_penalty = survival["fear"] * 15.0
+        # ── Layer-Evolution adaptive coefficients (trained live by DreamerV3) ──
+        try:
+            from .layer_evolution import layer_evolution
+            coef = layer_evolution.get_coefficients()
+        except Exception:
+            coef = {"fomo": 12.0, "apathy": 5.0, "regime": 4.0, "fear": 15.0,
+                    "meta_scale": 1.0, "dreamer_scale": 1.0}
+
+        base_eff     = 50.0 + (base_conf - 50.0) * coef["dreamer_scale"]
+        fomo_boost   = psych["fomo_score"] * coef["fomo"]
+        apathy_drag  = psych["apathy_score"] * coef["apathy"]
+        fear_penalty = survival["fear"] * coef["fear"]
         cred_factor  = 0.65 if psych["narrative_credibility"] < 0.5 else 1.0
         regime_bonus = (
-            4.0  if psych["regime"].startswith("trending")
+            coef["regime"] if psych["regime"].startswith("trending")
             else -3.0 if psych["regime"] == "volatile"
             else 0.0
         )
 
-        raw_conf = (base_conf + fomo_boost + regime_bonus - apathy_drag - fear_penalty) * cred_factor
-        # Apply meta-reasoner confidence adjustment
-        raw_conf *= meta.get("confidence_adjust", 1.0)
+        raw_conf = (base_eff + fomo_boost + regime_bonus - apathy_drag - fear_penalty) * cred_factor
+        # Apply meta-reasoner adjustment, scaled by evolved meta-layer trust
+        meta_adj = 1.0 + (meta.get("confidence_adjust", 1.0) - 1.0) * coef["meta_scale"]
+        raw_conf *= meta_adj
         final_conf = max(15.0, min(98.0, raw_conf))
 
         # Action selection (circuit breakers first)
@@ -484,8 +494,9 @@ class HybridSuperBrain:
                 "apathy_drag":        round(-apathy_drag, 2),
                 "fear_penalty":       round(-fear_penalty, 2),
                 "credibility_factor": round(cred_factor, 2),
-                "meta_adjust":        round(meta.get("confidence_adjust", 1.0), 3),
+                "meta_adjust":        round(meta_adj, 3),
             },
+            "layer_coefficients": coef,
             "psych":      psych,
             "survival":   survival,
             "reasoning": (

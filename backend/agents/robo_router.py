@@ -318,6 +318,13 @@ async def get_status():
     except Exception:
         s["live_training"] = {"exp_count": 0, "train_steps": 0, "wm_loss": 0.0, "tickers": [], "dreamer_status": "idle"}
 
+    # Attach Robot 3.0 Layer Evolution state (all layers trained by live loop)
+    try:
+        from agents.layer_evolution import layer_evolution
+        s["layer_evolution"] = layer_evolution.get_full_state()
+    except Exception:
+        s["layer_evolution"] = {"enabled": False}
+
     return {"success": True, **s}
 
 

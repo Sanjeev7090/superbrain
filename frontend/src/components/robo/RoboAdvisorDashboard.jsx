@@ -514,6 +514,8 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const isDangerMode = settings.risk_tolerance === 'danger';
   const lt          = rs?.live_training || {};
   const isLiveTraining = isActive && (lt.exp_count > 0 || lt.train_steps > 0);
+  const le          = rs?.layer_evolution || {};
+  const isLayerEvolving = isActive && (le.total_updates > 0);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -892,6 +894,85 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 {!isLiveTraining && (
                   <p className="text-[8px] text-zinc-600 mt-1">
                     Live market data from active stocks will train DreamerV3 when auto mode runs
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* ── Robot 3.0 Layer Evolution (all layers trained by live loop) ── */}
+            {isActive && (
+              <div
+                className="mt-2 rounded-xl px-3 py-2 border"
+                style={{
+                  background: isLayerEvolving ? 'rgba(167,139,250,0.06)' : 'rgba(24,24,27,0.4)',
+                  borderColor: isLayerEvolving ? 'rgba(167,139,250,0.25)' : 'rgba(63,63,70,0.35)',
+                }}
+                data-testid="layer-evolution-panel"
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">
+                      Robot 3.0 · Layer Evolution
+                    </span>
+                    {isLayerEvolving && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
+                    )}
+                  </div>
+                  <span
+                    className="text-[8px] font-bold px-1.5 py-px rounded"
+                    style={{
+                      background: isLayerEvolving ? 'rgba(167,139,250,0.15)' : 'rgba(63,63,70,0.3)',
+                      color: isLayerEvolving ? '#a78bfa' : '#52525b',
+                    }}
+                    data-testid="layer-evolution-badge"
+                  >
+                    {isLayerEvolving ? 'ALL LAYERS TRAINING' : 'STANDBY'}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  {[
+                    { k: 'dreamer',       l: 'DreamerV3 RL',    c: '#34d399' },
+                    { k: 'psychology',    l: 'Psychology',       c: '#f472b6' },
+                    { k: 'strategy',      l: 'Strategy 6-Agent', c: '#60a5fa' },
+                    { k: 'mirofish_meta', l: 'MiroFish Meta',    c: '#a78bfa' },
+                    { k: 'survival',      l: 'Survival',         c: '#f59e0b' },
+                    { k: 'risk_gate',     l: 'Risk Gate',        c: '#f87171' },
+                  ].map(({ k, l, c }) => {
+                    const lay = le.layers?.[k] || {};
+                    const pct = lay.trust_pct ?? 50;
+                    return (
+                      <div key={k} className="flex items-center gap-1.5" data-testid={`layer-row-${k}`}>
+                        <span className="text-[8px] text-zinc-500 w-[72px] truncate">{l}</span>
+                        <div className="flex-1 h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-700"
+                            style={{ width: `${pct}%`, background: c }}
+                          />
+                        </div>
+                        <span className="text-[8px] font-bold w-[30px] text-right" style={{ color: c }}>
+                          {pct.toFixed(0)}%
+                        </span>
+                        <span className="text-[7px] text-zinc-600 w-[26px] text-right">
+                          ×{lay.updates ?? 0}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-zinc-800/60">
+                  <span className="text-[7px] text-zinc-600">
+                    Evolution updates: <span className="text-violet-400 font-bold">{(le.total_updates ?? 0).toLocaleString()}</span>
+                  </span>
+                  <span className="text-[7px] text-zinc-600">
+                    Trade closes learned: <span className="text-emerald-400 font-bold">{le.trade_closes_learned ?? 0}</span>
+                  </span>
+                </div>
+
+                {!isLayerEvolving && (
+                  <p className="text-[8px] text-zinc-600 mt-1">
+                    DreamerV3 live rewards will evolve all 6 brain layers — zero blind spots in trade decisions
                   </p>
                 )}
               </div>

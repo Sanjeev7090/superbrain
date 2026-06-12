@@ -393,6 +393,12 @@ class TradingLoop:
                             pass
                         logger.info("[TradingLoop][%s] Position closed | %s P&L=₹%.2f | reason=%s",
                                     cycle_id, tkr, pnl, cp.get("exit_reason", "?"))
+                        # ── Layer Evolution: strongest learning signal (real P&L)
+                        try:
+                            from agents.layer_evolution import layer_evolution
+                            layer_evolution.evolve_from_trade_close(tkr, pnl)
+                        except Exception as _lee:
+                            logger.debug("[LayerEvo] trade-close learn failed: %s", _lee)
 
             # ── Step 6: Circuit breaker check ────────────────────────────────
             risk = _recalculate_risk(prefs)
@@ -645,6 +651,18 @@ class TradingLoop:
                     self._live_last_obs[ticker]    = cur_obs
                     self._live_last_action[ticker] = live_action
                     self._live_last_price[ticker]  = live_price
+
+                    # ── Robot 3.0 Layer Evolution ─────────────────────────────
+                    # Propagate the SAME live reward signal to ALL brain layers
+                    # (psychology, strategy, meta, survival, risk-gate) so the
+                    # whole Robot 3.0 evolves together with DreamerV3.
+                    try:
+                        from agents.layer_evolution import layer_evolution
+                        layer_evolution.evolve_from_live_training(
+                            ticker, live_reward, brain_block, signal, confidence,
+                        )
+                    except Exception as _ee:
+                        logger.debug("[LayerEvo] evolve failed for %s: %s", ticker, _ee)
 
                 except Exception as _le:
                     logger.debug("[LiveTrain] push failed for %s: %s", ticker, _le)

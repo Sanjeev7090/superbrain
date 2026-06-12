@@ -331,6 +331,13 @@ def _trigger_live_mini_train(buf):
             live_wm_loss=round(float(wm_l), 6),
         )
 
+        # Propagate dreamer learning progress to Robot 3.0 layer evolution
+        try:
+            from agents.layer_evolution import layer_evolution as _levo
+            _levo.notify_dreamer_step(float(wm_l), float(a_l), float(c_l))
+        except Exception:
+            pass
+
         # Save periodically (every 50 live steps)
         if steps % 50 == 0:
             ticker_key = (_state.get("ticker") or "RELIANCE_NS").replace(".", "_")

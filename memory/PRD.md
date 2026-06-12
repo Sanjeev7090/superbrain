@@ -135,3 +135,26 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - `hybrid_brain_audit` — all brain decisions log
 - `robo_user_preferences` — user trading settings singleton
 - `robo_orders` — all paper/live trade orders
+
+---
+
+## Update (June 2026) — Robot 3.0 Layer Evolution Engine
+**Feature**: DreamerV3 LIVE TRAINING ab sirf khud evolve nahi hota — uske reward signals Robot 3.0 ke SABHI 6 layers ko train karte hain (zero blind-spots goal).
+
+**New file**: `/app/backend/agents/layer_evolution.py` — `LayerEvolutionEngine` singleton
+- 6 layers tracked with trust scores (EMA): dreamer, psychology, strategy, mirofish_meta, survival, risk_gate
+- Learning signals: trade close (lr=0.20, real P&L), live scan cycle (lr=0.08), dreamer WM-loss trend (lr=0.02)
+- Trust → adaptive coefficients for HybridSuperBrain._hybrid_engine (fomo/apathy/regime/fear multipliers + dreamer_scale/meta_scale). Trust 0.5 = original static values
+- Trade close also feeds AdaptiveLearner.record_trade_outcome (strategy 6-agents)
+- MongoDB persistence: `layer_evolution_state` collection (survives restarts)
+
+**Hooks**:
+- `trading_loop.py`: after push_live_experience → evolve_from_live_training; on position close → evolve_from_trade_close
+- `dreamer_trainer.py` `_trigger_live_mini_train` → notify_dreamer_step
+- `robo_router.py` /api/robo/status → attaches `layer_evolution` state
+
+**New endpoints**: `GET /api/hybrid-brain/layer-evolution`, `POST /api/hybrid-brain/layer-evolution/reset`
+
+**Frontend**: RoboAdvisorDashboard.jsx — "Robot 3.0 · Layer Evolution" panel (violet) below Live Training panel: 6 trust bars, update counts, total evolution updates, trade closes learned. data-testid: layer-evolution-panel, layer-evolution-badge, layer-row-{layer}
+
+**Tested**: unit simulation (trust evolution verified), e2e curl (endpoints + robo/status), hybrid engine adaptive coefficients, frontend compiles clean.
