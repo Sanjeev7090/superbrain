@@ -50,6 +50,8 @@ class LivermorePivotalScanner:
                 for p in pivots[-3:]
             ]
 
+            from agents.intraday_utils import make_intraday_plan
+            direction = "BUY" if trend == "UPTREND" else ("SELL" if trend == "DOWNTREND" else "BUY")
             return {
                 "symbol":          symbol,
                 "is_match":        bool(confluence_score >= 72),
@@ -61,6 +63,7 @@ class LivermorePivotalScanner:
                 "entry_price":     round(float(breakout["entry"]), 2) if breakout["is_valid"] else None,
                 "stop_loss":       round(float(breakout["stop_loss"]), 2) if breakout["is_valid"] else None,
                 "target":          round(current_price * 1.20, 2),
+                "intraday_plan":   make_intraday_plan(df, direction),
                 "reason":          reason,
                 "strength_signals": self._get_signals(trend, breakout),
                 "timestamp":       datetime.now().isoformat(),

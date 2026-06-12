@@ -66,6 +66,7 @@ class MinerviniVCPScanner:
             confluence_score = self._calculate_confluence_score(contractions, is_breakout, rel_strength)
             reason           = self._generate_reason(contractions, is_breakout, rel_strength)
 
+            from agents.intraday_utils import make_intraday_plan
             return {
                 "symbol":            symbol,
                 "is_match":          bool(confluence_score >= 75),
@@ -84,6 +85,7 @@ class MinerviniVCPScanner:
                 "entry_price":   round(float(df['high'].iloc[-1]) * 1.01, 2) if is_breakout else None,
                 "stop_loss":     round(float(df['low'].iloc[-5:].min()) * 0.98, 2),
                 "target":        round(current_price * 1.15, 2),
+                "intraday_plan": make_intraday_plan(df, "BUY"),
                 "reason":        reason,
                 "strength_signals": self._get_strength_signals(contractions, is_breakout, rel_strength),
                 "rel_strength":     round(float(rel_strength), 2),

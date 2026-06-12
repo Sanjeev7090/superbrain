@@ -62,6 +62,47 @@ function StockCard({ item, onLoad, loading }) {
           ))}
         </div>
       )}
+
+      {/* Intraday Plan */}
+      <IntradayPlan plan={item.intraday_plan} />
+    </div>
+  );
+}
+
+function IntradayPlan({ plan }) {
+  if (!plan?.entry) return null;
+  const fmt = v => v != null ? `₹${Number(v).toLocaleString('en-IN')}` : '—';
+  const dirColor = plan.direction === 'BUY' ? '#34d399' : '#f87171';
+  return (
+    <div className="mt-1.5 rounded-md px-2 py-1.5 space-y-1"
+      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="flex items-center gap-1.5 mb-0.5">
+        <span className="text-[7px] font-black uppercase tracking-wider" style={{ color: dirColor }}>
+          INTRADAY {plan.direction}
+        </span>
+        <span className="text-[6px] text-zinc-700">· exit {plan.exit_by}</span>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        <div className="text-center">
+          <p className="text-[6px] text-zinc-600">Entry</p>
+          <p className="text-[8px] font-black font-mono" style={{ color: dirColor }}>{fmt(plan.entry)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[6px] text-zinc-600">SL</p>
+          <p className="text-[8px] font-black font-mono text-red-400">{fmt(plan.sl)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[6px] text-zinc-600">T1 (1:2)</p>
+          <p className="text-[8px] font-black font-mono text-violet-400">{fmt(plan.t1)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-[6px] text-zinc-600">T2 (1:3)</p>
+          <p className="text-[8px] font-black font-mono text-violet-300">{fmt(plan.t2)}</p>
+        </div>
+      </div>
+      {plan.risk_per_share && (
+        <p className="text-[6px] text-zinc-700">Risk/share: {fmt(plan.risk_per_share)}</p>
+      )}
     </div>
   );
 }

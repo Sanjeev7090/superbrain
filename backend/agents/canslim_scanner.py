@@ -51,6 +51,7 @@ class CANSLIMScanner:
 
             stop_loss_val = float(df['low'].rolling(10).min().iloc[-1]) * 0.97
 
+            from agents.intraday_utils import make_intraday_plan
             return {
                 "symbol":          symbol,
                 "is_match":        is_match,
@@ -61,6 +62,7 @@ class CANSLIMScanner:
                 "entry_price":     round(float(df['high'].iloc[-1]) * 1.005, 2) if new_high else None,
                 "stop_loss":       round(stop_loss_val, 2),
                 "target":          round(current_price * 1.25, 2),
+                "intraday_plan":   make_intraday_plan(df, "BUY"),
                 "reason":          reason,
                 "canslim_breakdown": {
                     "C_A_Earnings":      int(earnings_score),

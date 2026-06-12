@@ -9480,6 +9480,7 @@ async def top_trader_universe_scan():
                     "target":           res.get("target"),
                     "strength_signals": res.get("strength_signals", []),
                     "reason":           res.get("reason", ""),
+                    "intraday_plan":    res.get("intraday_plan"),
                 })
 
     # Sort each group by score desc

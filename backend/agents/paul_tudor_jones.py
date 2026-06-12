@@ -51,6 +51,8 @@ class PaulTudorJonesScanner:
 
             stop_loss_val = float(df['low'].rolling(20).min().iloc[-1]) * 0.96
 
+            from agents.intraday_utils import make_intraday_plan
+            direction = "BUY" if above_ma200 else "SELL"
             return {
                 "symbol":           symbol,
                 "is_match":         is_match,
@@ -65,6 +67,7 @@ class PaulTudorJonesScanner:
                 "above_ma200":      above_ma200,
                 "trend_strength":   round(float(trend_strength), 1),
                 "macro_score":      round(float(macro_score), 1),
+                "intraday_plan":    make_intraday_plan(df, direction),
                 "reason":           reason,
                 "strength_signals": self._get_signals(above_ma200, momentum_break, risk_reward),
                 "timestamp":        datetime.now().isoformat(),
