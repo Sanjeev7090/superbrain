@@ -9284,6 +9284,49 @@ async def analyze_livermore_pivotal(request: LivermorePivotalRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── William O'Neil CANSLIM ────────────────────────────────────────────────────
+
+class CANSLIMRequest(BaseModel):
+    ticker: str
+
+@api_router.post("/strategy/canslim")
+async def analyze_canslim(request: CANSLIMRequest):
+    """
+    William O'Neil CANSLIM scanner.
+    Fetches 300 days of daily OHLCV from yfinance and runs all 7 CANSLIM criteria.
+    """
+    try:
+        from agents.canslim_scanner import CANSLIMScanner
+        ticker = request.ticker.upper().strip()
+
+        stock = yf.Ticker(ticker)
+        raw   = stock.history(period="300d", interval="1d", auto_adjust=True)
+        if raw is None or len(raw) < 200:
+            raise HTTPException(status_code=400, detail=f"Not enough data for {ticker} (need 200+ daily bars)")
+
+        df = raw.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                                  "Close": "close", "Volume": "volume"})
+        df = df[["open", "high", "low", "close", "volume"]].copy().dropna()
+
+        market_df = None
+        try:
+            nifty_raw = yf.Ticker("^NSEI").history(period="300d", interval="1d", auto_adjust=True)
+            if nifty_raw is not None and len(nifty_raw) >= 50:
+                market_df = nifty_raw.rename(columns={"Close": "close"})[["close"]].dropna()
+        except Exception:
+            pass
+
+        scanner = CANSLIMScanner()
+        result  = scanner.analyze_stock(df, ticker, market_df=market_df)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"CANSLIM error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ======================= NARRATIVE SWING BACKTEST =======================
 
 def _bt_narrative_swing(closes, highs, lows, dates, max_exit=5,
