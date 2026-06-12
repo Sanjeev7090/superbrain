@@ -141,6 +141,11 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
     const final = t.endsWith('.NS') || t.endsWith('.BO') ? t : t + '.NS';
     if (!watchlist.includes(final)) {
       setWatchlist(prev => [...prev, final]);
+      // Auto-set as Primary Ticker if none set yet
+      if (!form.ticker || form.ticker.trim() === '') {
+        setTickerQuery(final);
+        setForm(f => ({ ...f, ticker: final }));
+      }
     }
     setWlInput('');
     setWlResults([]);
@@ -314,7 +319,14 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
           {/* Ticker + Risk tolerance */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-zinc-300 mb-2">Primary Ticker</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-zinc-300">Primary Ticker</label>
+                {watchlist.length > 0 && (
+                  <span className="text-[8px] text-zinc-500 font-medium">
+                    {watchlist.length} from watchlist ↓
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 focus-within:border-violet-500 transition-colors">
                   <Search size={11} className="text-zinc-500 flex-shrink-0" />
@@ -357,6 +369,42 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
                   </div>
                 )}
               </div>
+
+              {/* Watchlist tickers shown as clickable Primary chips */}
+              {watchlist.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-[8px] text-zinc-600 mb-1.5 flex items-center gap-1">
+                    <span className="w-1 h-1 rounded-full bg-violet-500 inline-block" />
+                    Watchlist — click any to set as Primary
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {watchlist.map(t => {
+                      const isActive = form.ticker === t;
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            setTickerQuery(t);
+                            setForm(f => ({ ...f, ticker: t }));
+                            setTickerResults([]);
+                          }}
+                          data-testid={`primary-wl-chip-${t}`}
+                          className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all"
+                          style={{
+                            background: isActive ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.08)',
+                            border: isActive ? '1px solid rgba(139,92,246,0.6)' : '1px solid rgba(139,92,246,0.2)',
+                            color: isActive ? '#c4b5fd' : '#7c3aed',
+                            boxShadow: isActive ? '0 0 8px rgba(139,92,246,0.25)' : 'none',
+                          }}
+                        >
+                          {isActive && <span className="w-1 h-1 rounded-full bg-violet-400 animate-pulse" />}
+                          {t.replace('.NS', '').replace('.BO', '')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-xs font-bold text-zinc-300 mb-2">Risk Tolerance</label>
