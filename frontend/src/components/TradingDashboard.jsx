@@ -56,6 +56,7 @@ import PaperTradingPanel from './PaperTradingPanel';
 import SectorTrending from './SectorTrending';
 import SectorStocksSheet from './SectorStocksSheet';
 import TopMoversWidget from './TopMoversWidget';
+import MonteCarloPanel from './robo/MonteCarloPanel';
 import { Toaster, toast } from 'sonner';
 import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -879,6 +880,10 @@ const TradingDashboard = () => {
                     <p className="text-slate-400 dark:text-zinc-500 text-sm">Select a stock or crypto to view strategies</p>
                   </div>
                 )}
+                {/* ── Monte Carlo Strategy Validator ─────────────────────── */}
+                <div className="pt-2">
+                  <MonteCarloPanel initialCapital={100000} />
+                </div>
               </div>
             )}
 
