@@ -880,10 +880,6 @@ const TradingDashboard = () => {
                     <p className="text-slate-400 dark:text-zinc-500 text-sm">Select a stock or crypto to view strategies</p>
                   </div>
                 )}
-                {/* ── Monte Carlo Strategy Validator ─────────────────────── */}
-                <div className="pt-2">
-                  <MonteCarloPanel initialCapital={100000} />
-                </div>
               </div>
             )}
 
@@ -908,7 +904,10 @@ const TradingDashboard = () => {
             </div>
 
             {activeTab === 'ensemble' && (
-              <EnsembleCockpitPanel selectedStock={selectedStock} />
+              <div className="space-y-3 p-2">
+                <EnsembleCockpitPanel selectedStock={selectedStock} />
+                <MonteCarloPanel initialCapital={100000} />
+              </div>
             )}
 
             {activeTab === 'picker' && (
