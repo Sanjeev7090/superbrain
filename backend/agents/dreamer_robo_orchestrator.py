@@ -707,341 +707,135 @@ def _fetch_market_context(ticker: str) -> Dict:
 
 
 # ─── DreamerV3 Decision Bridge ────────────────────────────────────────────────
+# HybridSuperBrain v5.0 is now the fully central engine.
+# This function is kept as a thin compatibility shim — all logic lives in brain.
 
 def _get_dreamer_decision(ticker: str, prefs: UserPreferences, risk: RiskProfile) -> Dict:
     """
-    Bridge to existing DreamerV3 agent:
-      1. Get DreamerV3 state (signal + weights + confidence)
-      2. Apply user-target–aware position sizing
-      3. Apply risk profile constraints
-      4. Return actionable decision
+    Compatibility shim → delegates 100% to HybridSuperBrain.decide_sync_full().
+
+    HybridSuperBrain internally runs:
+      DreamerV3 → SMC → Kronos → DeltaDash → MiroFish →
+      LayerEvolution → AgentConsensus → Psychological →
+      Survival → MetaReasoner → EliteDecision → PositionSizing
     """
     try:
-        import sys
-        import importlib
-        from pathlib import Path
+        from .hybrid_super_brain import hybrid_brain
 
-        parent = str(Path(__file__).parent.parent)
-        if parent not in sys.path:
-            sys.path.insert(0, parent)
+        # Push daily PnL into brain
+        if prefs.allocated_capital > 0:
+            pnl_frac = float(_state.get("daily_pnl", 0.0)) / float(prefs.allocated_capital)
+            hybrid_brain.update_daily_pnl_sync(pnl_frac)
 
-        # Import dreamer_trainer from rl_agent package
-        rl = importlib.import_module("rl_agent.dreamer_trainer")
-
-        state      = rl.get_state()
-        dreamer_status = state.get("status", "idle")
-
-        if dreamer_status not in ("running", "training", "paused"):
-            # Even when Dreamer is idle, surface Hybrid Brain so its psych+survival
-            # layer is visible in the UI and survival fear keeps tracking PnL.
-            hb_idle = {}
-            try:
-                from .hybrid_super_brain import hybrid_brain
-                if prefs.allocated_capital > 0:
-                    pnl_frac = float(_state.get("daily_pnl", 0.0)) / float(prefs.allocated_capital)
-                    hybrid_brain.update_daily_pnl_sync(pnl_frac)
-                hb = hybrid_brain.decide_sync(
-                    market_data={},      # auto-defaults inside brain
-                    news="",
-                    symbol=ticker,
-                    dreamer_confidence=50.0,
-                )
-                hb_idle = {
-                    "action":      hb.get("action"),
-                    "confidence":  round(float(hb.get("confidence", 50.0)), 1),
-                    "size_scalar": float(hb.get("size_scalar", 1.0)),
-                    "fear":        float(hb.get("survival", {}).get("fear", 0.0)),
-                    "regime":      hb.get("psych", {}).get("regime"),
-                    "fomo":        hb.get("psych", {}).get("fomo_score"),
-                    "narrative":   hb.get("psych", {}).get("narrative_credibility"),
-                    "reasoning":   hb.get("reasoning"),
-                    "active":      True,
-                    "note":        "Dreamer idle — brain runs in observation mode",
-                }
-            except Exception as e:
-                hb_idle = {"active": False, "error": str(e)}
-
-            return {
-                "signal":      "HOLD",
-                "confidence":  0,
-                "direction":   0,
-                "quantity":    0,
-                "entry_price": 0.0,
-                "sl_price":    0.0,
-                "tp_price":    0.0,
-                "position_value": 0.0,
-                "dreamer_active": False,
-                "hybrid_brain":   hb_idle,
-                "message":     "DreamerV3 not active – Hybrid Brain observing (start RL training to trade).",
-                "strategy_weights": {},
-                "wm_loss":     0.0,
-            }
-
-        # Use prediction from dreamer
-        pred = rl.get_prediction(ticker)
-        signal     = pred.get("signal", "HOLD")
-        confidence = pred.get("confidence", 0)
-        _trade_sig  = state.get("last_trade_signal", 0.0)
-        weights    = pred.get("strategy_weights", {})
-        wm_loss    = pred.get("wm_loss", 0.0)
-
-        # Market context for position sizing
+        # Build lean market_data hint (brain enriches from live if sparse)
         ctx = _fetch_market_context(ticker)
-        price     = ctx.get("price", 0.0)
-        _atr_pct  = ctx.get("atr_pct", 0.015)
-        atr14     = ctx.get("atr14", price * 0.015)
-        regime    = ctx.get("regime", "UNKNOWN")
-        rsi14     = ctx.get("rsi14", 50.0)
+        market_data = {
+            "price":      ctx.get("price", 0.0),
+            "atr14":      ctx.get("atr14", 0.0),
+            "atr_pct":    ctx.get("atr_pct", 0.015),
+            "regime":     ctx.get("regime", "UNKNOWN"),
+            "rsi14":      ctx.get("rsi14", 50.0),
+            "vol_ratio":  ctx.get("vol_ratio", 1.0),
+            "change_pct": ctx.get("change_pct", 0.0),
+        }
 
-        # Risk-adjusted quantity based on user settings
-        risk_amount_inr = prefs.allocated_capital * (risk.risk_per_trade_pct / 100.0)
-        sl_distance_inr = atr14 * ATR_MULTIPLIER_SL
-
-        if price > 0 and sl_distance_inr > 0:
-            quantity = max(1, int(risk_amount_inr / sl_distance_inr))
-        else:
-            quantity = 1
-
-        position_value = quantity * price if price > 0 else 0.0
-
-        # SL / TP prices
-        if signal == "BUY":
-            sl_price = price - atr14 * ATR_MULTIPLIER_SL
-            tp_price = price + atr14 * ATR_MULTIPLIER_SL * risk.recommended_rr
-        elif signal == "SELL":
-            sl_price = price + atr14 * ATR_MULTIPLIER_SL
-            tp_price = price - atr14 * ATR_MULTIPLIER_SL * risk.recommended_rr
-        else:
-            sl_price = tp_price = price
-
-        # Daily-target-aware confidence boost
-        # If we're behind target, be slightly more aggressive with signals
-        daily_pnl    = _state.get("daily_pnl", 0.0)
-        target_gap   = prefs.daily_profit_target - daily_pnl
-        behind_boost = 1.0
-        if target_gap > 0 and prefs.daily_profit_target > 0:
-            behind_frac  = min(target_gap / prefs.daily_profit_target, 1.0)
-            behind_boost = 1.0 + behind_frac * 0.20  # up to 20% confidence boost
-
-        # Danger mode extra boost (F&O only — higher conviction needed)
-        if prefs.risk_tolerance == "danger":
-            behind_boost = min(behind_boost * 1.25, 1.5)
-
-        effective_confidence = min(100, int(confidence * behind_boost))
-
-        # ── Agent Consensus Blending ──────────────────────────────────────
-        # Pull latest discussion from state (non-blocking)
-        agent_consensus = {}
-        blended_signal  = signal
-        blended_conf    = effective_confidence
-        agent_override  = False
-
+        # Pull latest agent discussion as news context
+        news_blurb = ""
         with _lock:
-            disc = _state.get("agent_discussion") or {}
+            disc = dict(_state.get("agent_discussion") or {})
+        if isinstance(disc, dict):
+            news_blurb = str(disc.get("summary", "") or disc.get("rationale", "") or "")
 
-        if disc and disc.get("ticker") == ticker:
-            c_signal = disc.get("consensus", "HOLD")
-            c_conf   = float(disc.get("consensus_confidence", 0))
-            c_score  = float(disc.get("weighted_score", 0))
+        # ★ Single central brain call ★
+        hb = hybrid_brain.decide_sync_full(
+            ticker=ticker,
+            prefs=prefs,
+            risk=risk,
+            market_data=market_data,
+            news=news_blurb,
+        )
 
-            # Dynamic blend weights: if DreamerV3 is idle/HOLD, give agents full weight
-            # (otherwise their 40% share alone rarely crosses the entry gate).
-            dreamer_is_idle = (signal == "HOLD" or effective_confidence < 10)
-            if dreamer_is_idle:
-                w_dreamer, w_agents = 0.0, 1.0
-            else:
-                w_dreamer, w_agents = 0.60, 0.40
-
-            dreamer_numeric = (1 if signal == "BUY" else -1 if signal == "SELL" else 0) * effective_confidence
-            agent_numeric   = (1 if c_signal == "BUY" else -1 if c_signal == "SELL" else 0) * c_conf
-            blended_numeric = dreamer_numeric * w_dreamer + agent_numeric * w_agents
-
-            # Lowered gate from ±25 to ±15 to match collaborator's consensus threshold.
-            if abs(blended_numeric) >= 15:
-                blended_signal = "BUY" if blended_numeric > 0 else "SELL"
-                blended_conf   = int(min(98, max(30, abs(blended_numeric))))
-            else:
-                blended_signal = "HOLD"
-                blended_conf   = max(10, int(50 - abs(blended_numeric)))
-
-            # Hard override: if agents STRONGLY disagree with DreamerV3 → HOLD
-            if signal != "HOLD" and c_signal not in (signal, "HOLD") and c_conf > 60:
-                blended_signal = "HOLD"
-                blended_conf   = 30
-                agent_override = True
-                logger.info(
-                    "[DreamerV3] Agent override: DV3=%s but agents=%s (conf=%.0f) → HOLD",
-                    signal, c_signal, c_conf,
-                )
-
-            agent_consensus = {
-                "agent_signal":    c_signal,
-                "agent_conf":      round(c_conf, 1),
-                "agent_score":     round(c_score, 1),
-                "blended_signal":  blended_signal,
-                "blended_conf":    blended_conf,
-                "agent_override":  agent_override,
-                "dreamer_only":    False,
-            }
-            logger.info(
-                "[DreamerV3] Blended: DV3=%s(%d) + Agents=%s(%.0f) → %s(%d)",
-                signal, effective_confidence, c_signal, c_conf,
-                blended_signal, blended_conf,
-            )
-        else:
-            # No collaborative analysis yet — run fast background analysis
-            agent_consensus = {"dreamer_only": True}
-
-        # ── 4. HYBRID SUPER BRAIN — final fusion layer ─────────────────────
-        # Adds Psychological + Survival edge on top of Dreamer + Agents.
-        # Can scale position size or trigger HOLD (extreme fear circuit-breaker).
-        hybrid_block = {}
-        final_signal = blended_signal
-        final_conf   = blended_conf
-        size_scalar  = 1.0
-        try:
-            from .hybrid_super_brain import hybrid_brain
-
-            # Push current daily PnL % into the brain so survival fear stays in sync
-            if prefs.allocated_capital > 0:
-                pnl_frac = float(_state.get("daily_pnl", 0.0)) / float(prefs.allocated_capital)
-                hybrid_brain.update_daily_pnl_sync(pnl_frac)
-
-            market_data = {
-                "volatility_index": float(_atr_pct or 0.015) * 3.0,    # ATR%→approx vol index
-                "atr_pct":          float(_atr_pct or 0.015),
-                "momentum_strength": 0.5 + (1.0 if signal == "BUY" else -1.0 if signal == "SELL" else 0.0) * (effective_confidence / 200.0),
-                "change_pct":       float(ctx.get("change_pct", 0.0) or 0.0),
-                "volume_thrust":    float(ctx.get("volume_thrust", 1.0) or 1.0),
-            }
-
-            news_blurb = ""
-            if isinstance(disc, dict):
-                news_blurb = str(disc.get("summary", "") or disc.get("rationale", "") or "")
-
-            hb = hybrid_brain.decide_sync(
-                market_data=market_data,
-                news=news_blurb,
-                symbol=ticker,
-                dreamer_confidence=float(blended_conf),
-            )
-
-            hb_action     = hb.get("action", blended_signal)
-            hb_conf       = float(hb.get("confidence", blended_conf))
-            size_scalar   = float(hb.get("size_scalar", 1.0))
-            survival_fear = float(hb.get("survival", {}).get("fear", 0.0))
-
-            # Circuit-breaker: extreme fear forces HOLD
-            if survival_fear > 0.80:
-                final_signal = "HOLD"
-                final_conf   = int(min(blended_conf, 40))
-            else:
-                # If brain agrees direction, take its confidence (richer than raw blend)
-                if hb_action == blended_signal and blended_signal in ("BUY", "SELL"):
-                    final_signal = blended_signal
-                    final_conf   = int(round(hb_conf))
-                # If brain says HOLD while blend says BUY/SELL → soften but don't kill
-                elif hb_action == "HOLD" and blended_signal in ("BUY", "SELL"):
-                    final_conf = int(round((blended_conf + hb_conf) / 2))
-                    if final_conf < 50:
-                        final_signal = "HOLD"
-                # If brain flips direction with strong fear/credibility → trust brain
-                elif hb_action in ("BUY", "SELL") and blended_signal == "HOLD":
-                    final_signal = hb_action
-                    final_conf   = int(round(hb_conf))
-
-            # Scale quantity by brain's size scalar (clamped)
-            if final_signal in ("BUY", "SELL") and quantity > 0:
-                quantity       = max(1, int(round(quantity * size_scalar)))
-                position_value = quantity * price if price > 0 else 0.0
-
-            hybrid_block = {
-                "action":       hb_action,
-                "confidence":   round(hb_conf, 1),
-                "size_scalar":  round(size_scalar, 3),
-                "fear":         round(survival_fear, 3),
-                "regime":       hb.get("psych", {}).get("regime"),
-                "fomo":         hb.get("psych", {}).get("fomo_score"),
-                "apathy":       hb.get("psych", {}).get("apathy_score"),
-                "narrative":    hb.get("psych", {}).get("narrative_credibility"),
-                "components":   hb.get("components", {}),
-                "risk_alert":   hb.get("risk_alert"),
-                "reasoning":    hb.get("reasoning"),
-                "id":           hb.get("id"),
-            }
-            logger.info(
-                "[DreamerV3] HybridBrain fusion: blend=%s(%d) → final=%s(%d) · size×%.2f · fear=%.2f · %s",
-                blended_signal, blended_conf, final_signal, final_conf,
-                size_scalar, survival_fear, hb.get("psych", {}).get("regime", "—"),
-            )
-        except Exception as hb_err:
-            logger.warning(f"[DreamerV3] HybridBrain unavailable: {hb_err}")
-            hybrid_block = {"error": str(hb_err), "active": False}
-
-        # Recompute SL/TP if signal direction changed
-        if final_signal != blended_signal:
-            if final_signal == "BUY":
-                sl_price = price - atr14 * ATR_MULTIPLIER_SL
-                tp_price = price + atr14 * ATR_MULTIPLIER_SL * risk.recommended_rr
-            elif final_signal == "SELL":
-                sl_price = price + atr14 * ATR_MULTIPLIER_SL
-                tp_price = price - atr14 * ATR_MULTIPLIER_SL * risk.recommended_rr
-            else:
-                sl_price = tp_price = price
+        action     = hb.get("action", "HOLD")
+        confidence = hb.get("confidence", 0.0)
+        size_scalar= hb.get("size_scalar", 1.0)
+        fear       = hb.get("fear_level", 0.0)
+        dreamer    = hb.get("dreamer", {})
+        agents_blk = hb.get("agents", {})
 
         return {
-            "signal":          final_signal,
-            "confidence":      final_conf,
-            "direction":       1 if final_signal == "BUY" else (-1 if final_signal == "SELL" else 0),
-            "quantity":        quantity,
-            "entry_price":     round(price, 2),
-            "sl_price":        round(sl_price, 2),
-            "tp_price":        round(tp_price, 2),
-            "position_value":  round(position_value, 2),
-            "dreamer_active":  True,
-            "dreamer_status":  dreamer_status,
-            "dreamer_raw_signal": signal,
-            "dreamer_raw_conf":   effective_confidence,
-            "blended_signal":  blended_signal,
-            "blended_conf":    blended_conf,
-            "hybrid_brain":    hybrid_block,
-            "size_scalar":     round(size_scalar, 3),
-            "wm_loss":         round(wm_loss, 6),
-            "strategy_weights": weights,
-            "market_context":  ctx,
-            "regime":          regime,
-            "rsi14":           rsi14,
-            "risk_profile":    risk.to_dict(),
-            "daily_target":    prefs.daily_profit_target,
-            "daily_pnl":       daily_pnl,
-            "target_gap":      round(target_gap, 2),
-            "behind_boost":    round(behind_boost, 3),
-            "agent_consensus": agent_consensus,
-            "message": (
-                f"DV3={signal}({effective_confidence}%) + "
-                f"Agents={agent_consensus.get('agent_signal','—')}({agent_consensus.get('agent_conf',0):.0f}%) → "
-                f"Blend={blended_signal}({blended_conf}%) | "
-                f"Brain={hybrid_block.get('action','—')} size×{hybrid_block.get('size_scalar',1.0):.2f} fear={hybrid_block.get('fear',0):.2f} → "
-                f"FINAL={final_signal}({final_conf}%) | {regime} | RSI {rsi14:.0f}"
+            # ── Core signal ────────────────────────────────────────────────
+            "signal":            action,
+            "confidence":        int(confidence),
+            "direction":         hb.get("direction", 0),
+            # ── Position details ───────────────────────────────────────────
+            "quantity":          hb.get("quantity", 1),
+            "entry_price":       hb.get("entry_price", round(ctx.get("price", 0.0), 2)),
+            "sl_price":          hb.get("sl_price",  0.0) or 0.0,
+            "tp_price":          hb.get("tp_price",  0.0) or 0.0,
+            "position_value":    hb.get("position_value", 0.0),
+            # ── Context ────────────────────────────────────────────────────
+            "dreamer_active":    dreamer.get("active", False),
+            "dreamer_status":    dreamer.get("source", "unavailable"),
+            "dreamer_raw_signal":dreamer.get("signal", "HOLD"),
+            "dreamer_raw_conf":  int(dreamer.get("confidence", 0)),
+            "blended_signal":    action,
+            "blended_conf":      int(confidence),
+            # ── Hybrid Brain block (for UI) ────────────────────────────────
+            "hybrid_brain": {
+                "action":      action,
+                "confidence":  round(confidence, 1),
+                "size_scalar": round(size_scalar, 3),
+                "fear":        round(fear, 3),
+                "regime":      hb.get("psych", {}).get("regime"),
+                "fomo":        hb.get("psych", {}).get("fomo_score"),
+                "apathy":      hb.get("psych", {}).get("apathy_score"),
+                "narrative":   hb.get("psych", {}).get("narrative_credibility"),
+                "components":  hb.get("components", {}),
+                "risk_alert":  hb.get("risk_alert"),
+                "reasoning":   hb.get("reasoning"),
+                "smc_signal":  hb.get("smc_signal"),
+                "kronos_cycle":hb.get("kronos_cycle"),
+            },
+            # ── Scalars ────────────────────────────────────────────────────
+            "size_scalar":    round(size_scalar, 3),
+            "wm_loss":        float(dreamer.get("wm_loss", 0.0)),
+            "strategy_weights": dreamer.get("strategy_weights", {}),
+            "market_context": ctx,
+            "regime":         ctx.get("regime", "UNKNOWN"),
+            "rsi14":          ctx.get("rsi14", 50.0),
+            "risk_profile":   risk.to_dict() if hasattr(risk, "to_dict") else {},
+            "daily_target":   getattr(prefs, "daily_profit_target", 0),
+            "daily_pnl":      _state.get("daily_pnl", 0.0),
+            "target_gap":     round(
+                getattr(prefs, "daily_profit_target", 0) - _state.get("daily_pnl", 0.0), 2
             ),
-            "timestamp":       datetime.now(timezone.utc).isoformat(),
+            "behind_boost":   1.0,
+            "agent_consensus": {
+                "agent_signal": agents_blk.get("signal", "—"),
+                "agent_conf":   round(agents_blk.get("confidence", 0.0), 1),
+                "available":    agents_blk.get("available", False),
+            },
+            "message": (
+                f"Brain={action}({confidence:.0f}%) "
+                f"DV3={dreamer.get('signal','?')}({dreamer.get('confidence',0):.0f}%) "
+                f"SMC={hb.get('smc_signal','?')} "
+                f"Kronos={hb.get('kronos_cycle','?')} "
+                f"fear={fear:.2f} size×{size_scalar:.2f} | "
+                f"{hb.get('reasoning','')[:60]}"
+            ),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as exc:
-        logger.exception("Dreamer decision error")
+        logger.exception("[DreamerBridge] _get_dreamer_decision failed")
         return {
-            "signal":      "HOLD",
-            "confidence":  0,
-            "direction":   0,
-            "quantity":    0,
-            "entry_price": 0.0,
-            "sl_price":    0.0,
-            "tp_price":    0.0,
-            "position_value": 0.0,
-            "dreamer_active": False,
-            "error":       str(exc),
-            "timestamp":   datetime.now(timezone.utc).isoformat(),
+            "signal": "HOLD", "confidence": 0, "direction": 0,
+            "quantity": 0, "entry_price": 0.0, "sl_price": 0.0, "tp_price": 0.0,
+            "position_value": 0.0, "dreamer_active": False, "hybrid_brain": {},
+            "size_scalar": 1.0, "wm_loss": 0.0, "strategy_weights": {},
+            "error": str(exc), "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
 
 
 # ─── Paper Trading Engine ─────────────────────────────────────────────────────
