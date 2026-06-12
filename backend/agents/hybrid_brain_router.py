@@ -185,3 +185,41 @@ async def layer_evolution_reset():
     from .layer_evolution import layer_evolution
     layer_evolution.reset()
     return {"success": True, **layer_evolution.get_full_state()}
+
+
+
+# ─── Universe Scan ─────────────────────────────────────────────────────────────
+
+class ScanRequest(BaseModel):
+    segment:        str   = "all"    # "all" | "fo" | "equity" | "banknifty"
+    min_confidence: float = Field(60.0, ge=0, le=100)
+    top_n:          int   = Field(20, ge=1, le=50)
+
+
+@router.post("/scan")
+async def universe_scan(req: ScanRequest):
+    """
+    Scan full NSE + F&O universe through HybridSuperBrain logic.
+    Returns top BUY / SELL picks ranked by confidence.
+    Super fast: batch OHLCV + parallel scoring (~200 stocks in <15s).
+    """
+    from .universe_scanner import universe_scanner
+    result = await universe_scanner.scan(
+        segment=req.segment,
+        min_confidence=req.min_confidence,
+        top_n=req.top_n,
+    )
+    return result
+
+
+@router.get("/scan/status")
+async def scan_status():
+    """Return current scan status and last result summary."""
+    from .universe_scanner import universe_scanner
+    status = universe_scanner.get_status()
+    last   = universe_scanner.get_last_results()
+    return {
+        **status,
+        "last_buys":  [r for r in last if r["action"] == "BUY"][:5],
+        "last_sells": [r for r in last if r["action"] == "SELL"][:5],
+    }

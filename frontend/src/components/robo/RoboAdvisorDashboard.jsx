@@ -256,6 +256,13 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const [dangerPicks, setDangerPicks]     = useState([]);
   const [dangerScanning, setDangerScanning] = useState(false);
 
+  // Universe Scan state
+  const [scanOpen,     setScanOpen]     = useState(false);
+  const [scanLoading,  setScanLoading]  = useState(false);
+  const [scanResults,  setScanResults]  = useState(null);
+  const [scanSegment,  setScanSegment]  = useState('all');
+  const [scanTab,      setScanTab]      = useState('buys'); // buys | sells
+
   const pollRef = useRef(null);
 
   // Sync ticker from parent chart
@@ -498,6 +505,26 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
       toast.error('Danger scan failed: ' + (e.response?.data?.detail || e.message));
     } finally {
       setDangerScanning(false);
+    }
+  };
+
+  const handleUniverseScan = async () => {
+    setScanLoading(true);
+    setScanResults(null);
+    setScanOpen(true);
+    setScanTab('buys');
+    try {
+      const res = await axios.post(`${API}/hybrid-brain/scan`, {
+        segment: scanSegment,
+        min_confidence: 62,
+        top_n: 25,
+      });
+      setScanResults(res.data);
+      toast.success(`🔍 Scan done — ${res.data.total_scanned} stocks in ${res.data.scan_time_sec}s`, { duration: 3000 });
+    } catch (e) {
+      toast.error('Scan failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setScanLoading(false);
     }
   };
 
@@ -822,6 +849,253 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 >
                   {brainLoading ? '⟳' : '⚡'}
                 </button>
+              )}
+            </div>
+
+            {/* ── UNIVERSE SCAN ─────────────────────────────────────────── */}
+            <div className="mt-2">
+              {/* Scan Trigger Row */}
+              <div className="flex items-center gap-2">
+                {/* Segment selector */}
+                <select
+                  value={scanSegment}
+                  onChange={e => setScanSegment(e.target.value)}
+                  className="flex-1 bg-zinc-900 border border-zinc-700 text-zinc-300 text-[9px] rounded-lg px-2 py-1.5 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="all">All Stocks</option>
+                  <option value="fo">F&amp;O Only</option>
+                  <option value="equity">Equity Only</option>
+                  <option value="banknifty">Bank Nifty</option>
+                </select>
+
+                {/* SCAN button */}
+                <button
+                  onClick={handleUniverseScan}
+                  disabled={scanLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all disabled:opacity-60"
+                  style={{
+                    background: scanLoading
+                      ? 'rgba(16,185,129,0.15)'
+                      : 'linear-gradient(135deg,#059669,#047857)',
+                    border: '1px solid rgba(16,185,129,0.4)',
+                    color: '#6ee7b7',
+                    boxShadow: scanLoading ? 'none' : '0 0 12px rgba(16,185,129,0.25)',
+                  }}
+                >
+                  {scanLoading ? (
+                    <>
+                      <span className="animate-spin text-[11px]">⟳</span>
+                      <span>Scanning…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔍</span>
+                      <span>SCAN</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Collapse toggle if results exist */}
+                {scanResults && !scanLoading && (
+                  <button
+                    onClick={() => setScanOpen(v => !v)}
+                    className="text-[9px] px-2 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 transition-all"
+                  >
+                    {scanOpen ? '▲' : '▼'}
+                  </button>
+                )}
+              </div>
+
+              {/* Scan Results Panel */}
+              {scanOpen && (
+                <div
+                  className="mt-2 rounded-xl border overflow-hidden"
+                  style={{
+                    background: 'rgba(6,6,8,0.95)',
+                    borderColor: 'rgba(16,185,129,0.25)',
+                  }}
+                >
+                  {/* Header */}
+                  <div
+                    className="px-3 py-2 flex items-center justify-between"
+                    style={{ background: 'rgba(16,185,129,0.08)', borderBottom: '1px solid rgba(16,185,129,0.2)' }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">
+                        🔍 Universe Scan
+                      </span>
+                      {scanResults && (
+                        <span className="text-[8px] text-zinc-500">
+                          {scanResults.total_scanned} stocks · {scanResults.scan_time_sec}s
+                        </span>
+                      )}
+                    </div>
+
+                    {/* BUY / SELL tabs */}
+                    {scanResults && (
+                      <div className="flex gap-1">
+                        {['buys', 'sells'].map(t => (
+                          <button
+                            key={t}
+                            onClick={() => setScanTab(t)}
+                            className="text-[8px] px-2 py-0.5 rounded font-bold transition-all"
+                            style={{
+                              background: scanTab === t
+                                ? (t === 'buys' ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)')
+                                : 'rgba(39,39,42,0.6)',
+                              color: scanTab === t
+                                ? (t === 'buys' ? '#6ee7b7' : '#fca5a5')
+                                : '#71717a',
+                              border: `1px solid ${scanTab === t
+                                ? (t === 'buys' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)')
+                                : 'rgba(63,63,70,0.4)'}`,
+                            }}
+                          >
+                            {t === 'buys' ? `▲ BUY (${scanResults.buys?.length || 0})` : `▼ SELL (${scanResults.sells?.length || 0})`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Loading state */}
+                  {scanLoading && (
+                    <div className="flex flex-col items-center justify-center py-8 gap-2">
+                      <div className="w-8 h-8 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
+                      <p className="text-[10px] text-emerald-400 font-semibold">Scanning {scanSegment === 'all' ? '200+' : scanSegment.toUpperCase()} stocks…</p>
+                      <p className="text-[8px] text-zinc-600">SMC + Kronos + DeltaDash + Brain</p>
+                    </div>
+                  )}
+
+                  {/* Results List */}
+                  {!scanLoading && scanResults && (
+                    <div className="max-h-80 overflow-y-auto">
+                      {(scanTab === 'buys' ? scanResults.buys : scanResults.sells)?.length === 0 ? (
+                        <div className="text-center py-6">
+                          <p className="text-[10px] text-zinc-600">No strong {scanTab === 'buys' ? 'BUY' : 'SELL'} signals found</p>
+                        </div>
+                      ) : (
+                        <div className="p-2 space-y-1.5">
+                          {(scanTab === 'buys' ? scanResults.buys : scanResults.sells)?.map((stock, idx) => (
+                            <div
+                              key={stock.ticker}
+                              className="rounded-lg px-2.5 py-2 border transition-all hover:border-zinc-600 cursor-pointer group"
+                              style={{
+                                background: stock.action === 'BUY'
+                                  ? 'rgba(16,185,129,0.05)'
+                                  : 'rgba(239,68,68,0.05)',
+                                borderColor: stock.action === 'BUY'
+                                  ? 'rgba(16,185,129,0.15)'
+                                  : 'rgba(239,68,68,0.15)',
+                              }}
+                              onClick={() => {
+                                if (onSelectStock) {
+                                  onSelectStock({ ticker: stock.ticker, name: stock.name, type: stock.segment === 'fo' ? 'FO' : 'EQUITY' });
+                                }
+                                setSettings(p => ({ ...p, ticker: stock.ticker.replace('.NS', '') }));
+                                toast.success(`Ticker set → ${stock.ticker.replace('.NS', '')}`, { duration: 1500 });
+                              }}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                {/* Left: rank + ticker + name */}
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-[8px] text-zinc-600 font-mono w-4 shrink-0">#{idx + 1}</span>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-black text-white truncate">
+                                        {stock.ticker.replace('.NS', '')}
+                                      </span>
+                                      <span
+                                        className="text-[8px] font-bold px-1 py-0.5 rounded uppercase"
+                                        style={{
+                                          background: stock.segment === 'fo' ? 'rgba(139,92,246,0.2)' : 'rgba(59,130,246,0.15)',
+                                          color: stock.segment === 'fo' ? '#c4b5fd' : '#93c5fd',
+                                          border: stock.segment === 'fo' ? '1px solid rgba(139,92,246,0.3)' : '1px solid rgba(59,130,246,0.3)',
+                                        }}
+                                      >
+                                        {stock.segment === 'fo' ? 'F&O' : stock.segment === 'banknifty' ? 'BNF' : 'EQ'}
+                                      </span>
+                                    </div>
+                                    <p className="text-[8px] text-zinc-500 truncate">{stock.name}</p>
+                                  </div>
+                                </div>
+
+                                {/* Right: confidence + action */}
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {/* SMC + Kronos mini tags */}
+                                  <div className="hidden sm:flex flex-col gap-0.5 items-end">
+                                    <span className={`text-[7px] px-1 rounded font-semibold ${
+                                      stock.smc_signal === 'bullish' ? 'text-emerald-400 bg-emerald-900/20'
+                                      : stock.smc_signal === 'bearish' ? 'text-red-400 bg-red-900/20'
+                                      : 'text-zinc-500 bg-zinc-800/50'
+                                    }`}>
+                                      SMC {stock.smc_signal}
+                                    </span>
+                                    <span className="text-[7px] text-violet-400 bg-violet-900/20 px-1 rounded">
+                                      ⏱ {stock.kronos_phase?.replace('_', ' ')}
+                                    </span>
+                                  </div>
+
+                                  {/* Confidence */}
+                                  <div className="flex flex-col items-end gap-0.5">
+                                    <span
+                                      className="text-[11px] font-black"
+                                      style={{ color: stock.action === 'BUY' ? '#34d399' : '#f87171' }}
+                                    >
+                                      {stock.confidence.toFixed(0)}%
+                                    </span>
+                                    {/* Mini confidence bar */}
+                                    <div className="w-10 h-1 rounded-full bg-zinc-800">
+                                      <div
+                                        className="h-full rounded-full transition-all"
+                                        style={{
+                                          width: `${stock.confidence}%`,
+                                          background: stock.action === 'BUY'
+                                            ? 'linear-gradient(90deg,#059669,#34d399)'
+                                            : 'linear-gradient(90deg,#dc2626,#f87171)',
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Bottom row: price + SL + TP + RSI + R:R */}
+                              <div className="flex items-center gap-3 mt-1.5 pt-1.5 border-t border-zinc-800/60">
+                                <span className="text-[8px] text-zinc-300 font-mono">₹{stock.price?.toLocaleString('en-IN')}</span>
+                                <span className="text-[8px] text-red-400 font-mono">SL {stock.sl_price?.toLocaleString('en-IN')}</span>
+                                <span className="text-[8px] text-emerald-400 font-mono">TP {stock.tp_price?.toLocaleString('en-IN')}</span>
+                                <span className="text-[8px] text-zinc-500">RSI {stock.rsi14}</span>
+                                <span className="text-[8px] text-zinc-500">{stock.regime}</span>
+                                <span
+                                  className="ml-auto text-[8px] font-bold px-1.5 py-0.5 rounded"
+                                  style={{ background: 'rgba(59,130,246,0.15)', color: '#93c5fd' }}
+                                >
+                                  R:R {stock.rr_ratio}x
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Footer stats */}
+                  {!scanLoading && scanResults && (
+                    <div
+                      className="px-3 py-1.5 flex items-center gap-3 text-[8px] text-zinc-600"
+                      style={{ borderTop: '1px solid rgba(39,39,42,0.8)' }}
+                    >
+                      <span>📊 {scanResults.total_scanned} scanned</span>
+                      <span>🎯 {scanResults.total_hits} hits</span>
+                      <span>⚡ {scanResults.scan_time_sec}s</span>
+                      <span className="ml-auto text-zinc-700">
+                        {new Date(scanResults.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
