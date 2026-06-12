@@ -19,7 +19,7 @@ import sys
 from datetime import datetime
 
 # Backend URL from frontend/.env
-BASE_URL = "https://hybrid-brain-scan-1.preview.emergentagent.com"
+BASE_URL = "https://monte-carlo-lab-1.preview.emergentagent.com"
 API_URL = f"{BASE_URL}/api"
 
 class Colors:
