@@ -1065,7 +1065,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         </div>
 
         {/* ── Watchlist Parallel Observer ───────────────────────────────── */}
-        {(rs?.watchlist?.length > 0 || Object.keys(rs?.watchlist_observations || {}).length > 0) && (
+        {((rs?.watchlist?.length > 0) || (Object.keys(rs?.watchlist_observations || {}).length > 0) || (rs?.live_obs_status?.running)) && (
           <WatchlistParallelPanel roboState={rs} isActive={isActive} />
         )}
 

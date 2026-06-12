@@ -56,6 +56,23 @@ from .risk_portfolio_manager import (
     compute_dynamic_risk_budget,
     get_volatility_regime,
 )
+try:
+    from .live_observation_loop import live_obs_loop as _live_obs_loop
+except Exception as _lol_e:
+    _live_obs_loop = None
+    logger.warning("LiveObservationLoop unavailable: %s", _lol_e)
+
+
+def _maybe_start_obs_loop(tickers):
+    """Auto-start / update live observation loop for given tickers (non-blocking)."""
+    if _live_obs_loop is None:
+        return
+    all_t = [t for t in tickers if t]
+    if all_t:
+        try:
+            _live_obs_loop.start_or_update(all_t)
+        except Exception as _e:
+            logger.debug("LiveObsLoop start failed: %s", _e)
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +235,13 @@ async def update_settings(req: SettingsRequest, bg: BackgroundTasks):
     bg.add_task(orch.save_preferences_to_db)
     bg.add_task(rpm.save_settings_to_db)
 
+    # Auto-start / update DreamerV3 live observation when ticker changes
+    from .dreamer_robo_orchestrator import _prefs as _settings_prefs
+    new_ticker  = req.ticker or _settings_prefs.ticker or "RELIANCE.NS"
+    wl_tickers  = req.watchlist or _settings_prefs.watchlist or []
+    all_tickers = list({new_ticker.strip().upper()} | {t.strip().upper() for t in wl_tickers if t})
+    _maybe_start_obs_loop(all_tickers)
+
     # Attach capital state vector to response
     result["capital_state_vector"] = rpm.get_capital_state_vector(
         current_pnl=0.0, trades_today=0, open_position_value=0.0
@@ -328,6 +352,12 @@ async def get_status():
     # Attach watchlist observations (per-ticker signal + trade plan)
     s["watchlist_observations"] = state.get("watchlist_observations", {})
 
+    # Attach live observation loop status (DreamerV3 training per ticker)
+    if _live_obs_loop is not None:
+        s["live_obs_status"] = _live_obs_loop.get_status()
+    else:
+        s["live_obs_status"] = {"running": False, "tickers": []}
+
     return {"success": True, **s}
 
 
@@ -352,6 +382,13 @@ async def start_auto_mode(req: StartRequest):
         ticker           = req.ticker,
         interval_minutes = req.interval_minutes,
     )
+
+    # ── Auto-start live observation for primary + watchlist tickers ───────────
+    if result.get("success"):
+        from .dreamer_robo_orchestrator import _prefs as _start_prefs
+        primary_t = (req.ticker or _start_prefs.ticker or "RELIANCE.NS").strip().upper()
+        wl_t      = list(_start_prefs.watchlist or [])
+        _maybe_start_obs_loop(list({primary_t} | {t.strip().upper() for t in wl_t if t}))
 
     # ── Activate Hybrid Brain in background ──────────────────────────────────
     if result.get("success"):
@@ -1237,11 +1274,18 @@ async def update_watchlist(req: WatchlistRequest, bg: BackgroundTasks):
         max_parallel_trades = req.max_parallel_trades,
     )
     bg.add_task(orch.save_preferences_to_db)
+
+    # Auto-start / update DreamerV3 live observation for ALL watchlist stocks
+    from .dreamer_robo_orchestrator import _prefs as _wl_prefs
+    primary = (_wl_prefs.ticker or "RELIANCE.NS").strip().upper()
+    all_tickers = list({primary} | set(clean))
+    _maybe_start_obs_loop(all_tickers)
+
     return {
         "success":             True,
         "watchlist":           clean,
         "max_parallel_trades": req.max_parallel_trades,
-        "message":             f"Watchlist updated: {len(clean)} stocks | Max parallel: {req.max_parallel_trades}",
+        "message":             f"Watchlist updated: {len(clean)} stocks | Max parallel: {req.max_parallel_trades} | DreamerV3 training auto-started",
     }
 
 

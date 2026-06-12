@@ -42,7 +42,7 @@ function ConfBar({ pct, signal }) {
   );
 }
 
-function TickerRow({ ticker, obs, isExpanded, onToggle }) {
+function TickerRow({ ticker, obs, isExpanded, onToggle, isTraining }) {
   const sig     = obs.signal || 'HOLD';
   const sCfg    = SIGNAL_CFG[sig] || SIGNAL_CFG.HOLD;
   const hasPos  = obs.has_position;
@@ -121,10 +121,16 @@ function TickerRow({ ticker, obs, isExpanded, onToggle }) {
           {obs.regime || '—'}
         </span>
 
-        {/* Status: IN POSITION or WATCHING */}
+        {/* Status: IN POSITION or WATCHING or TRAINING */}
         {hasPos ? (
           <span className="text-[7px] font-black px-1.5 py-0.5 rounded flex-shrink-0 bg-emerald-900/30 text-emerald-400 border border-emerald-700/30">
             IN POS
+          </span>
+        ) : isTraining ? (
+          <span className="text-[7px] font-black px-1.5 py-0.5 rounded flex-shrink-0 border flex items-center gap-0.5"
+            style={{ background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' }}>
+            <span className="inline-block w-1 h-1 rounded-full bg-indigo-400 animate-pulse" />
+            LIVE
           </span>
         ) : (
           <span className="text-[7px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 bg-zinc-800/50 text-zinc-600">
@@ -217,17 +223,25 @@ function TickerRow({ ticker, obs, isExpanded, onToggle }) {
 export default function WatchlistParallelPanel({ roboState, isActive }) {
   const [expanded, setExpanded] = useState({});
 
-  const obs   = roboState?.watchlist_observations || {};
-  const tickers = Object.keys(obs);
+  const obs         = roboState?.watchlist_observations || {};
+  const tickers     = Object.keys(obs);
+  const loopStatus  = roboState?.live_obs_status || {};
+  const loopRunning = loopStatus?.running || false;
+  const trainingTickers = new Set(loopStatus?.tickers || []);
 
   // Summary counts
   const buyCount  = tickers.filter(t => obs[t]?.signal === 'BUY').length;
   const sellCount = tickers.filter(t => obs[t]?.signal === 'SELL').length;
   const inPos     = tickers.filter(t => obs[t]?.has_position).length;
 
+  // All watchlist tickers from prefs (even if no obs yet)
+  const watchlistFromPrefs = roboState?.watchlist || [];
+  const allTickers         = tickers.length > 0 ? tickers
+    : watchlistFromPrefs.map(t => t.replace('.NS','').replace('.BO',''));
+
   const toggle = (t) => setExpanded(p => ({ ...p, [t]: !p[t] }));
 
-  if (tickers.length === 0) {
+  if (tickers.length === 0 && watchlistFromPrefs.length === 0) {
     return (
       <div
         className="rounded-2xl border border-dashed border-zinc-800/60 flex items-center justify-center py-8"
@@ -270,6 +284,14 @@ export default function WatchlistParallelPanel({ roboState, isActive }) {
 
         {/* Summary chips */}
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Live training indicator */}
+          {loopRunning && (
+            <span className="text-[8px] font-black px-1.5 py-0.5 rounded flex items-center gap-1"
+              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)', color: '#818cf8' }}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+              DV3 TRAINING LIVE
+            </span>
+          )}
           {buyCount > 0 && (
             <span className="text-[8px] font-black px-1.5 py-0.5 rounded bg-emerald-900/20 text-emerald-400 border border-emerald-700/20">
               {buyCount} BUY
@@ -285,7 +307,7 @@ export default function WatchlistParallelPanel({ roboState, isActive }) {
               {inPos} IN POS
             </span>
           )}
-          <span className="text-[8px] text-zinc-600 font-mono">{tickers.length} stocks</span>
+          <span className="text-[8px] text-zinc-600 font-mono">{allTickers.length} stocks</span>
         </div>
       </div>
 
@@ -301,25 +323,51 @@ export default function WatchlistParallelPanel({ roboState, isActive }) {
         <span className="text-[7px] text-zinc-700 uppercase w-[42px] text-right">Status</span>
       </div>
 
-      {/* Ticker rows */}
+      {/* Ticker rows — show all obs tickers OR watchlist prefs if no obs yet */}
       <div className="divide-y divide-zinc-800/30">
-        {tickers.map(ticker => (
-          <TickerRow
-            key={ticker}
-            ticker={ticker}
-            obs={obs[ticker]}
-            isExpanded={!!expanded[ticker]}
-            onToggle={() => toggle(ticker)}
-          />
-        ))}
+        {tickers.length > 0
+          ? tickers.map(ticker => (
+              <TickerRow
+                key={ticker}
+                ticker={ticker}
+                obs={obs[ticker]}
+                isExpanded={!!expanded[ticker]}
+                onToggle={() => toggle(ticker)}
+                isTraining={trainingTickers.has(ticker) || trainingTickers.has(ticker + '.NS') || trainingTickers.has(ticker + '.BO')}
+              />
+            ))
+          : watchlistFromPrefs.map(ticker => {
+              const sym = ticker.replace('.NS','').replace('.BO','');
+              return (
+                <div key={ticker}
+                  className="flex items-center gap-2.5 px-3 py-2.5"
+                  data-testid={`watchlist-obs-${sym}`}
+                >
+                  <span className="text-[10px] font-mono font-black text-zinc-400 w-[64px]">{sym}</span>
+                  {(trainingTickers.has(ticker) || trainingTickers.has(sym)) ? (
+                    <span className="text-[7px] font-black px-1.5 py-0.5 rounded border flex items-center gap-0.5"
+                      style={{ background: 'rgba(99,102,241,0.15)', borderColor: 'rgba(99,102,241,0.4)', color: '#818cf8' }}>
+                      <span className="inline-block w-1 h-1 rounded-full bg-indigo-400 animate-pulse" />
+                      TRAINING
+                    </span>
+                  ) : (
+                    <span className="text-[7px] text-zinc-600 px-1.5 py-0.5 rounded bg-zinc-800/40">
+                      Waiting for first scan…
+                    </span>
+                  )}
+                </div>
+              );
+            })
+        }
       </div>
 
-      {/* Footer note */}
       <div className="px-4 py-2 border-t border-zinc-800/40">
         <p className="text-[7px] text-zinc-700">
-          {isActive
-            ? `Observations refresh every scan cycle · Trade execution limited to ${roboState?.max_parallel_trades || 3} parallel positions`
-            : 'Start auto mode to begin live observation of all watchlist stocks'}
+          {loopRunning
+            ? `DreamerV3 training LIVE · ${trainingTickers.size} ticker(s) · refreshes every ${loopStatus?.interval_s || 60}s · ${loopStatus?.cycle_count || 0} cycles`
+            : isActive
+            ? `Observations refresh every scan cycle · execution limited to ${roboState?.max_parallel_trades || 3} parallel positions`
+            : 'Add stocks to watchlist → DreamerV3 live training auto-starts'}
         </p>
       </div>
     </div>
