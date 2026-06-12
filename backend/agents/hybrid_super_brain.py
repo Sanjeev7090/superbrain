@@ -122,6 +122,9 @@ class MildSurvivalEngine:
         await self.persist()
 
 
+from .smc_analyzer import SMCAnalyzer
+from .kronos import KronosScheduler
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2) WRAPPER CLASSES for new imports
 # ─────────────────────────────────────────────────────────────────────────────
@@ -186,105 +189,6 @@ class DeltaDashScoreboard:
         except Exception as e:
             logger.debug("[DeltaDashScoreboard] get_score: %s", e)
             return {"Total": 150, "ticker": ticker}
-
-
-class KronosScheduler:
-    """Thin wrapper for Kronos time-cycle signal."""
-
-    def get_cycle_signal(self, ticker: str) -> Dict:
-        """Return current Kronos cycle phase for the ticker."""
-        try:
-            # Basic time-of-day cycle logic as lightweight proxy
-            hour = datetime.now().hour
-            if 9 <= hour < 11:
-                phase, bias = "accumulation", "bullish"
-            elif 11 <= hour < 13:
-                phase, bias = "distribution", "neutral"
-            elif 13 <= hour < 15:
-                phase, bias = "markup", "bullish"
-            else:
-                phase, bias = "markdown", "bearish"
-            return {"phase": phase, "bias": bias, "ticker": ticker}
-        except Exception:
-            return {"phase": "unknown", "bias": "neutral", "ticker": ticker}
-
-
-class SMCAnalyzer:
-    """Smart Money Concepts analyzer — wraps chart_data into SMC signals."""
-
-    def analyze(self, chart_data) -> Dict:
-        """Detect Order Blocks, FVGs, liquidity sweeps from OHLCV bars."""
-        if not chart_data:
-            return {
-                "smc_score": 0.0,
-                "order_block": False,
-                "fair_value_gap": False,
-                "signal": "neutral",
-                "structure_bias": "NEUTRAL",
-            }
-        try:
-            bars = chart_data if isinstance(chart_data, list) else []
-            if len(bars) < 10:
-                return {"smc_score": 0.0, "order_block": False, "fair_value_gap": False,
-                        "signal": "neutral", "structure_bias": "NEUTRAL"}
-
-            closes = [float(b.get("close", b.get("c", 0))) for b in bars if b]
-            highs  = [float(b.get("high",  b.get("h", 0))) for b in bars if b]
-            lows   = [float(b.get("low",   b.get("l", 0))) for b in bars if b]
-
-            if len(closes) < 5:
-                return {"smc_score": 0.0, "order_block": False, "fair_value_gap": False,
-                        "signal": "neutral", "structure_bias": "NEUTRAL"}
-
-            # Simple BOS / CHoCH detection
-            recent_high = max(highs[-5:])
-            recent_low  = min(lows[-5:])
-            curr_close  = closes[-1]
-            prev_high   = max(highs[-10:-5]) if len(highs) >= 10 else recent_high
-            prev_low    = min(lows[-10:-5])  if len(lows)  >= 10 else recent_low
-
-            bos_bull = curr_close > prev_high
-            bos_bear = curr_close < prev_low
-
-            # Detect FVG (3-candle gap)
-            fvg = False
-            if len(bars) >= 3:
-                for i in range(len(bars) - 3, max(0, len(bars) - 8), -1):
-                    h1 = float(bars[i].get("high",  bars[i].get("h", 0)))
-                    l3 = float(bars[i+2].get("low", bars[i+2].get("l", 0)))
-                    if l3 > h1:
-                        fvg = True
-                        break
-
-            # Order block detection (last strong candle before reversal)
-            ob = bos_bull or bos_bear
-
-            # SMC score
-            smc_score = 0.0
-            if bos_bull:
-                smc_score += 0.5
-            if bos_bear:
-                smc_score -= 0.5
-            if fvg:
-                smc_score += 0.2 if bos_bull else -0.2
-            smc_score = max(-1.0, min(1.0, smc_score))
-
-            signal = "bullish" if smc_score > 0.2 else "bearish" if smc_score < -0.2 else "neutral"
-            bias   = "BULLISH" if bos_bull else "BEARISH" if bos_bear else "NEUTRAL"
-
-            return {
-                "smc_score":      round(smc_score, 3),
-                "order_block":    ob,
-                "fair_value_gap": fvg,
-                "signal":         signal,
-                "structure_bias": bias,
-                "bos_bullish":    bos_bull,
-                "bos_bearish":    bos_bear,
-            }
-        except Exception as e:
-            logger.debug("[SMCAnalyzer] analyze: %s", e)
-            return {"smc_score": 0.0, "order_block": False, "fair_value_gap": False,
-                    "signal": "neutral", "structure_bias": "NEUTRAL"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -378,7 +282,9 @@ class HybridSuperBrain:
             miro_task = asyncio.create_task(
                 self.mirofish.run_analysis(market_data, news, chart_data)
             )
-            smc_analysis = self.smc.analyze(chart_data) if chart_data else {}
+            # SMC uses chart_data if available, falls back to market_data flags
+            smc_input = chart_data if chart_data else market_data
+            smc_analysis = self.smc.analyze(smc_input)
 
             # 2. DreamerV3 confidence
             dreamer_conf = dreamer_confidence or 50.0
