@@ -195,8 +195,7 @@ function NotificationBanner({ rs, loopStatus }) {
     msgs.push({ type: 'warn', text: `Loop error: ${loopStatus.last_error?.slice(0, 80)}` });
   if (rs?.consecutive_losses >= 3)
     msgs.push({ type: 'warn', text: `${rs.consecutive_losses} consecutive losses — position size reduced 50%` });
-  if (!loopStatus?.market_open && rs?.auto_mode)
-    msgs.push({ type: 'info', text: 'NSE market closed — loop waiting for 09:15 IST' });
+  // Market-closed info banner removed — brain runs 24x7 in observation/paper mode
 
   if (msgs.length === 0) return null;
   const typeStyle = {
