@@ -547,7 +547,6 @@ const TradingDashboard = () => {
     { id: 'ensemble',   label: 'AI ASSEMBLE', shortLabel: 'AI ASM'  },
     { id: 'picker',     label: 'PICKER',      shortLabel: 'PICK'    },
     { id: 'pece',       label: 'PE-CE OI',    shortLabel: 'PE-CE'   },
-    { id: 'quant',      label: '⚡ QUANT',    shortLabel: '⚡QNT'   },
   ];
 
   const leftTabs = [
