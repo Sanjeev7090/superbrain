@@ -227,7 +227,15 @@ export default function RLAgentPanel({ selectedStock }) {
 
         {/* Ticker */}
         <div>
-          <p className="text-[10px] text-zinc-500 mb-1 uppercase tracking-widest">Stock Ticker</p>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Stock Ticker</p>
+            {selectedStock?.ticker && selectedStock.ticker === ticker && (
+              <span className="text-[8px] text-violet-400 font-bold flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-violet-400 inline-block" />
+                synced from primary
+              </span>
+            )}
+          </div>
           <input
             value={ticker}
             onChange={e => setTicker(e.target.value.toUpperCase())}

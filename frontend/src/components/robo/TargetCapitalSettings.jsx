@@ -212,6 +212,10 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
           max_parallel_trades: maxParallel,
         }),
       ]);
+      // ── Sync Primary Ticker → DreamerV3 RL ticker on save ──
+      if (form.ticker && onSelectStock) {
+        onSelectStock({ ticker: form.ticker, name: form.ticker.replace('.NS', '').replace('.BO', ''), type: 'stock' });
+      }
       onSave?.();
       onClose?.();
     } catch (e) {
@@ -335,6 +339,14 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
                     value={tickerQuery}
                     onChange={e => handleTickerChange(e.target.value)}
                     onKeyDown={e => e.key === 'Escape' && setTickerResults([])}
+                    onBlur={() => {
+                      // Sync typed ticker to DreamerV3 RL on blur
+                      const t = tickerQuery.trim().toUpperCase();
+                      if (t && t.length >= 3 && onSelectStock && t !== form.ticker) {
+                        const final = t.endsWith('.NS') || t.endsWith('.BO') ? t : t + '.NS';
+                        onSelectStock({ ticker: final, name: final.replace('.NS', '').replace('.BO', ''), type: 'stock' });
+                      }
+                    }}
                     className="flex-1 bg-transparent text-white text-sm font-mono outline-none placeholder-zinc-600"
                     placeholder="e.g. RELIANCE.NS"
                     data-testid="ticker-input"
@@ -387,6 +399,8 @@ export default function TargetCapitalSettings({ settings, onSave, onClose, onSel
                             setTickerQuery(t);
                             setForm(f => ({ ...f, ticker: t }));
                             setTickerResults([]);
+                            // ── Sync to DreamerV3 RL ticker automatically ──
+                            if (onSelectStock) onSelectStock({ ticker: t, name: t.replace('.NS', '').replace('.BO', ''), type: 'stock' });
                           }}
                           data-testid={`primary-wl-chip-${t}`}
                           className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all"
