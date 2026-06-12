@@ -28,6 +28,7 @@ import RoboControls             from './RoboControls';
 import TargetCapitalSettings    from './TargetCapitalSettings';
 import AgentDiscussionPanel     from './AgentDiscussionPanel';
 import WatchlistParallelPanel   from './WatchlistParallelPanel';
+import MonteCarloPanel           from './MonteCarloPanel';
 import { LiveTickInline }       from '../LiveTickBadge';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
@@ -1515,6 +1516,9 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         {((rs?.watchlist?.length > 0) || (Object.keys(rs?.watchlist_observations || {}).length > 0) || (rs?.live_obs_status?.running)) && (
           <WatchlistParallelPanel roboState={rs} isActive={isActive} />
         )}
+
+        {/* ── Monte Carlo Strategy Validator ───────────────────────────────── */}
+        <MonteCarloPanel initialCapital={settings.allocated_capital || 100000} />
 
         {/* ── DANGER MODE: F&O Universe Picks ───────────────────────────── */}        {isDangerMode && (
           <div

@@ -126,6 +126,19 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
   - `IndicesTickerBar.jsx` — NIFTY/SENSEX/BANKNIFTY now update every 2s (was 15s), live green dot
   - `RoboAdvisorDashboard.jsx` — Robot 3.0 header shows live price of active ticker
 
+### Phase 13 — Monte Carlo Strategy Validator (Jun 2026)
+- **Backend**: `agents/monte_carlo.py` — `realistic_monte_carlo_simulation()` + `build_return_histogram()`
+  - 2000-path simulation, slippage 0.08%, commission 0.05%, 8% skip rate
+  - Returns: summary stats, 50 equity curves, return histogram
+- **API**: `POST /api/robo/monte-carlo` — fetches closed trades from `robo_orders`, runs simulation
+  - Falls back to synthetic demo data when no trades available
+- **Frontend**: `components/robo/MonteCarloPanel.jsx`
+  - 8-stat grid: Win Prob, Mean/Median Return, P5/P95, Avg/Worst DD, Risk of Ruin
+  - Fan chart: 50 sample equity curves (recharts LineChart)
+  - Return distribution histogram (recharts BarChart)
+  - "RUN SIM" button with loading state
+- **Integrated**: Below WatchlistParallelPanel in RoboAdvisorDashboard
+
 ---
 
 ## Prioritized Backlog

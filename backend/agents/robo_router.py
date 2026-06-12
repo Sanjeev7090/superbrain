@@ -1534,3 +1534,101 @@ async def danger_mode_scan(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Danger scan failed: {e}")
+
+
+
+# ── Monte Carlo Simulation ─────────────────────────────────────────────────
+
+@robo_router.post("/monte-carlo")
+async def run_monte_carlo(
+    initial_capital: float = 100000,
+    simulations: int = 1000,
+    slippage: float = 0.0008,
+    commission: float = 0.0005,
+    skip_rate: float = 0.08,
+):
+    """
+    POST /api/robo/monte-carlo
+    Fetches all CLOSED robo_orders, converts to trade returns, runs Monte Carlo.
+    """
+    try:
+        from .monte_carlo import realistic_monte_carlo_simulation, build_return_histogram
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        db = _get_robo_db()
+
+        # Fetch closed trades
+        cursor = db["robo_orders"].find(
+            {"status": "CLOSED"},
+            {"_id": 0, "pnl": 1, "entry_price": 1, "exit_price": 1,
+             "direction": 1, "quantity": 1, "ticker": 1}
+        ).sort("entry_time", -1).limit(500)
+        raw_trades = await cursor.to_list(length=500)
+
+        if not raw_trades:
+            # Return demo simulation with synthetic trades for preview
+            import numpy as np_mc
+            demo_trades = [
+                {"return": float(r), "pnl": float(p)}
+                for r, p in zip(
+                    np_mc.random.normal(0.015, 0.025, 40),
+                    np_mc.random.normal(1500, 2500, 40),
+                )
+            ]
+        else:
+            demo_trades = None
+
+        # Build trade list with return %
+        if demo_trades:
+            trades = demo_trades
+            using_demo = True
+        else:
+            trades = []
+            for t in raw_trades:
+                entry = t.get("entry_price") or 0
+                exit_p = t.get("exit_price") or 0
+                pnl    = t.get("pnl") or 0
+                if entry and exit_p:
+                    ret = (exit_p - entry) / entry
+                    if t.get("direction") == "SELL":
+                        ret = -ret
+                else:
+                    ret = pnl / initial_capital if initial_capital else 0
+                trades.append({"return": float(ret), "pnl": float(pnl)})
+            using_demo = False
+
+        # Run simulation in thread (CPU-bound)
+        def _run():
+            return realistic_monte_carlo_simulation(
+                trades=trades,
+                initial_capital=initial_capital,
+                simulations=simulations,
+                slippage=slippage,
+                commission=commission,
+                skip_rate=skip_rate,
+            )
+
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            result = await loop.run_in_executor(ex, _run)
+
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+
+        # Build histogram for frontend chart
+        histogram = build_return_histogram(result["all_simulations"])
+
+        return {
+            "success":      True,
+            "using_demo":   using_demo,
+            "trade_count":  len(trades),
+            "histogram":    histogram,
+            **result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("[robo_router] monte_carlo failed")
+        raise HTTPException(status_code=500, detail=str(e))
