@@ -9370,6 +9370,150 @@ async def analyze_paul_tudor(request: PaulTudorRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Top Trader Universe Scan ──────────────────────────────────────────────────
+
+@api_router.post("/strategy/top-trader-universe-scan")
+async def top_trader_universe_scan():
+    """
+    Scans all F&O stocks against all 4 Top Trader strategies in parallel.
+    Returns matches grouped by strategy + top multi-match picks.
+    """
+    import concurrent.futures
+    import yfinance as _yf
+
+    from agents.minervini_vcp     import MinerviniVCPScanner
+    from agents.livermore_pivotal import LivermorePivotalScanner
+    from agents.canslim_scanner   import CANSLIMScanner
+    from agents.paul_tudor_jones  import PaulTudorJonesScanner
+
+    # F&O stocks only (skip index entries)
+    FO_STOCKS = [
+        {"ticker": "RELIANCE.NS",   "name": "Reliance",       "sector": "Energy"},
+        {"ticker": "HDFCBANK.NS",   "name": "HDFC Bank",      "sector": "Banking"},
+        {"ticker": "ICICIBANK.NS",  "name": "ICICI Bank",     "sector": "Banking"},
+        {"ticker": "SBIN.NS",       "name": "SBI",            "sector": "Banking"},
+        {"ticker": "AXISBANK.NS",   "name": "Axis Bank",      "sector": "Banking"},
+        {"ticker": "KOTAKBANK.NS",  "name": "Kotak Bank",     "sector": "Banking"},
+        {"ticker": "INDUSINDBK.NS", "name": "IndusInd Bank",  "sector": "Banking"},
+        {"ticker": "INFY.NS",       "name": "Infosys",        "sector": "IT"},
+        {"ticker": "TCS.NS",        "name": "TCS",            "sector": "IT"},
+        {"ticker": "HCLTECH.NS",    "name": "HCL Tech",       "sector": "IT"},
+        {"ticker": "WIPRO.NS",      "name": "Wipro",          "sector": "IT"},
+        {"ticker": "BAJFINANCE.NS", "name": "Bajaj Finance",  "sector": "NBFC"},
+        {"ticker": "LT.NS",         "name": "L&T",            "sector": "Infra"},
+        {"ticker": "MARUTI.NS",     "name": "Maruti",         "sector": "Auto"},
+        {"ticker": "TATAMOTORS.NS", "name": "Tata Motors",    "sector": "Auto"},
+        {"ticker": "TATASTEEL.NS",  "name": "Tata Steel",     "sector": "Metals"},
+        {"ticker": "JSWSTEEL.NS",   "name": "JSW Steel",      "sector": "Metals"},
+        {"ticker": "SUNPHARMA.NS",  "name": "Sun Pharma",     "sector": "Pharma"},
+        {"ticker": "DRREDDY.NS",    "name": "Dr Reddy",       "sector": "Pharma"},
+        {"ticker": "CIPLA.NS",      "name": "Cipla",          "sector": "Pharma"},
+        {"ticker": "ITC.NS",        "name": "ITC",            "sector": "FMCG"},
+        {"ticker": "BHARTIARTL.NS", "name": "Airtel",         "sector": "Telecom"},
+        {"ticker": "NTPC.NS",       "name": "NTPC",           "sector": "Power"},
+        {"ticker": "ADANIPORTS.NS", "name": "Adani Ports",    "sector": "Ports"},
+        {"ticker": "DLF.NS",        "name": "DLF",            "sector": "Realty"},
+        {"ticker": "TRENT.NS",      "name": "Trent",          "sector": "Retail"},
+        {"ticker": "PERSISTENT.NS", "name": "Persistent",     "sector": "IT"},
+        {"ticker": "LTIM.NS",       "name": "LTIMindtree",    "sector": "IT"},
+        {"ticker": "TATATECH.NS",   "name": "Tata Tech",      "sector": "IT"},
+        {"ticker": "ZOMATO.NS",     "name": "Zomato",         "sector": "Internet"},
+    ]
+
+    scanners = {
+        "minervini":   MinerviniVCPScanner(),
+        "livermore":   LivermorePivotalScanner(),
+        "canslim":     CANSLIMScanner(),
+        "paul_tudor":  PaulTudorJonesScanner(),
+    }
+
+    # Fetch Nifty once for market context
+    market_df = None
+    try:
+        nifty_raw = _yf.Ticker("^NSEI").history(period="400d", interval="1d", auto_adjust=True)
+        if nifty_raw is not None and len(nifty_raw) >= 50:
+            market_df = nifty_raw.rename(columns={"Close": "close"})[["close"]].dropna()
+    except Exception:
+        pass
+
+    def _scan_one(meta: dict):
+        try:
+            raw = _yf.Ticker(meta["ticker"]).history(period="400d", interval="1d", auto_adjust=True)
+            if raw is None or len(raw) < 100:
+                return None
+            df = raw.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                                      "Close": "close", "Volume": "volume"})
+            df = df[["open", "high", "low", "close", "volume"]].dropna()
+
+            results = {}
+            for name, scanner in scanners.items():
+                try:
+                    r = scanner.analyze_stock(df, meta["ticker"], market_df=market_df)
+                    results[name] = r
+                except Exception:
+                    results[name] = None
+
+            return {"meta": meta, "results": results}
+        except Exception:
+            return None
+
+    # Parallel fetch + scan
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+        raw_results = list(pool.map(_scan_one, FO_STOCKS))
+
+    # Group by strategy
+    grouped = {"minervini": [], "livermore": [], "canslim": [], "paul_tudor": []}
+    for item in raw_results:
+        if not item:
+            continue
+        meta = item["meta"]
+        for strat, res in item["results"].items():
+            if res and res.get("is_match"):
+                grouped[strat].append({
+                    "ticker":           meta["ticker"],
+                    "name":             meta["name"],
+                    "sector":           meta["sector"],
+                    "confluence_score": res.get("confluence_score", 0),
+                    "stage":            res.get("stage", ""),
+                    "entry_price":      res.get("entry_price"),
+                    "stop_loss":        res.get("stop_loss"),
+                    "target":           res.get("target"),
+                    "strength_signals": res.get("strength_signals", []),
+                    "reason":           res.get("reason", ""),
+                })
+
+    # Sort each group by score desc
+    for k in grouped:
+        grouped[k].sort(key=lambda x: x["confluence_score"], reverse=True)
+
+    # Top multi-match picks
+    ticker_strats: dict = {}
+    for strat, items in grouped.items():
+        for item in items:
+            t = item["ticker"]
+            if t not in ticker_strats:
+                ticker_strats[t] = {"ticker": t, "name": item["name"],
+                                    "sector": item["sector"], "strategies": [],
+                                    "scores": [], "best": item}
+            ticker_strats[t]["strategies"].append(strat)
+            ticker_strats[t]["scores"].append(item["confluence_score"])
+
+    multi_match = [
+        {**v["best"],
+         "matched_strategies": v["strategies"],
+         "avg_score": round(sum(v["scores"]) / len(v["scores"]), 1)}
+        for v in ticker_strats.values() if len(v["strategies"]) >= 2
+    ]
+    multi_match.sort(key=lambda x: (-len(x["matched_strategies"]), -x["avg_score"]))
+
+    return {
+        "scan_time":      datetime.utcnow().isoformat() + "Z",
+        "total_scanned":  len(FO_STOCKS),
+        "results":        grouped,
+        "multi_match":    multi_match[:10],
+    }
+
+
 # ======================= NARRATIVE SWING BACKTEST =======================
 
 def _bt_narrative_swing(closes, highs, lows, dates, max_exit=5,

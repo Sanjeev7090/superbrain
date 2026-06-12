@@ -61,6 +61,7 @@ import MinerviniVCPPanel from './MinerviniVCPPanel';
 import LivermorePivotalPanel from './LivermorePivotalPanel';
 import CANSLIMPanel from './CANSLIMPanel';
 import PaulTudorPanel from './PaulTudorPanel';
+import TopTraderUniverseScan from './TopTraderUniverseScan';
 import { Toaster, toast } from 'sonner';
 import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -303,7 +304,17 @@ const TradingDashboard = () => {
     fetchStockData(stock.ticker, defaultTf);
     subscribeWS(stock.ticker);
     setMobilePanel('chart');
-    // News popup NOT auto-opened — user can open via newspaper icon button
+  };
+
+  // Top Trader Concepts — load stock into Chart + Robot 3.0
+  const handleTopTraderStockLoad = async (stock) => {
+    handleStockSelect(stock);
+    try {
+      await axios.post(`${API}/robo/settings`, { ticker: stock.ticker });
+      toast.success(`${stock.name || stock.ticker} → Chart + Robot 3.0 loaded`, { duration: 2500, icon: '🤖' });
+    } catch (_) {
+      // chart still loads even if robo fails
+    }
   };
 
   // Map index symbol → underlying chart ticker
@@ -934,19 +945,10 @@ const TradingDashboard = () => {
             )}
 
             {activeTab === 'toptraders' && (
-              <div className="divide-y divide-zinc-800/60">
-                {/* Header */}
-                <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: 'rgba(234,179,8,0.04)' }}>
-                  <div className="w-1 h-4 rounded-full bg-yellow-500" />
-                  <span className="text-[10px] font-black text-yellow-400 uppercase tracking-widest">Top Trader Concepts</span>
-                </div>
-                <div className="p-2 space-y-2">
-                  <MinerviniVCPPanel selectedStock={selectedStock} />
-                  <LivermorePivotalPanel selectedStock={selectedStock} />
-                  <CANSLIMPanel selectedStock={selectedStock} />
-                  <PaulTudorPanel selectedStock={selectedStock} />
-                </div>
-              </div>
+              <TopTraderUniverseScan
+                selectedStock={selectedStock}
+                onStockLoad={handleTopTraderStockLoad}
+              />
             )}
             {activeTab === 'quant' && (
               <div className="space-y-0">
