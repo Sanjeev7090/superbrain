@@ -436,39 +436,66 @@ class TradingLoop:
                 self._update_state("last_cycle_status", "budget_stop")
                 return
 
-            # ── Step 8: Multi-stock scan & execute ────────────────────────────
-            current_open_count = len(engine.get_open_positions())
-            entries_this_cycle = 0
+            # ════════════════════════════════════════════════════════════════
+            # Step 8a: OBSERVE ALL watchlist tickers (no execution limit)
+            # Every stock in watchlist gets: market context, DreamerV3 signal,
+            # brain decision, trade plan (entry/SL/TP). Stored in _state.
+            # ════════════════════════════════════════════════════════════════
+            watchlist_obs: Dict[str, Dict] = {}
+            last_brain_block: Dict = {}
             last_signal = "HOLD"
             last_conf   = 0
+            entries_this_cycle = 0
 
             for ticker in watchlist:
-                # Stop if max parallel reached
-                if current_open_count + entries_this_cycle >= max_parallel:
-                    logger.info("[TradingLoop][%s] Max parallel (%d) reached — stopping scan",
-                                cycle_id, max_parallel)
-                    break
+                # Build base observation entry (always populated even on error)
+                has_pos = engine.has_open_position_for(ticker)
+                obs_entry: Dict = {
+                    "signal":         "HOLD",
+                    "confidence":     0,
+                    "price":          0.0,
+                    "regime":         "UNKNOWN",
+                    "rsi14":          50.0,
+                    "atr_pct":        1.5,
+                    "entry_target":   0.0,
+                    "sl_price":       None,
+                    "tp_price":       None,
+                    "brain_action":   "HOLD",
+                    "brain_conf":     0,
+                    "brain_fear":     0.0,
+                    "dreamer_signal": "HOLD",
+                    "dreamer_conf":   0,
+                    "dreamer_dir":    0.0,
+                    "brain_reason":   "",
+                    "has_position":   has_pos,
+                    "last_updated":   datetime.now(timezone.utc).isoformat(),
+                }
 
-                # Skip if this ticker already has an open position
-                if engine.has_open_position_for(ticker):
-                    logger.debug("[TradingLoop][%s] %s already has open position — skipping",
-                                 cycle_id, ticker)
-                    continue
-
-                # Fetch market context for this ticker
+                # Fetch market context
                 ctx = self._fetch_market_context(ticker)
                 live_price = ctx.get("price", 0.0)
 
                 if live_price <= 0:
-                    logger.warning("[TradingLoop][%s] %s — price fetch failed, skipping",
+                    logger.warning("[TradingLoop][%s] %s — price fetch failed, observing as HOLD",
                                    cycle_id, ticker)
+                    obs_entry["error"] = "price_unavailable"
+                    watchlist_obs[ticker] = obs_entry
                     continue
+
+                obs_entry["price"]        = round(live_price, 2)
+                obs_entry["entry_target"] = round(live_price, 2)
+                obs_entry["regime"]       = ctx.get("regime", "UNKNOWN")
+                obs_entry["rsi14"]        = round(float(ctx.get("rsi14", 50.0)), 1)
+                obs_entry["atr_pct"]      = round(float(ctx.get("atr_pct", 0.015)) * 100, 3)
 
                 # DreamerV3 decision
                 dreamer_dec = self._get_dreamer_decision_safe(prefs, risk)
+                obs_entry["dreamer_signal"] = dreamer_dec.get("signal", "HOLD")
+                obs_entry["dreamer_conf"]   = round(float(dreamer_dec.get("confidence", 0)), 1)
+                obs_entry["dreamer_dir"]    = dreamer_dec.get("direction", 0.0)
 
-                # ── Hybrid Brain sync on each cycle ──────────────────────────
-                brain_block = {}
+                # Hybrid Brain sync
+                brain_block: Dict = {}
                 try:
                     from agents.hybrid_super_brain import hybrid_brain
                     daily_pnl_pct = _state.get("daily_pnl", 0.0) / max(prefs.allocated_capital, 1.0)
@@ -478,23 +505,17 @@ class TradingLoop:
                         symbol=ticker.replace(".NS", "").replace(".BO", "").upper(),
                         dreamer_confidence=dreamer_dec.get("confidence", 60.0),
                     )
-                    _upd(
-                        brain_active=True,
-                        brain_action=brain_block.get("action", "HOLD"),
-                        brain_confidence=brain_block.get("confidence", 0.0),
-                        brain_fear=brain_block.get("survival", {}).get("fear", 0.0),
-                        brain_regime=brain_block.get("psych", {}).get("regime", ""),
-                        brain_last_decision=brain_block,
-                    )
+                    last_brain_block = brain_block
+                    obs_entry["brain_action"] = brain_block.get("action", "HOLD")
+                    obs_entry["brain_conf"]   = round(float(brain_block.get("confidence", 0)), 1)
+                    obs_entry["brain_fear"]   = round(float(brain_block.get("survival", {}).get("fear", 0.0)), 3)
                 except Exception as _be:
-                    logger.debug("[TradingLoop][%s] Brain sync failed: %s", cycle_id, _be)
+                    logger.debug("[TradingLoop][%s] Brain sync failed for %s: %s", cycle_id, ticker, _be)
 
                 # Meta decision (brain-aware)
                 meta = self._compute_meta_decision(dreamer_dec, ctx, risk_profile)
 
-                # ── Brain override logic ──────────────────────────────────────
-                # If brain and dreamer agree → boost confidence
-                # If brain vetoes (HOLD, high fear) → downgrade signal
+                # Brain override logic
                 if brain_block:
                     brain_action = brain_block.get("action", "HOLD")
                     brain_conf   = brain_block.get("confidence", 50.0)
@@ -502,14 +523,11 @@ class TradingLoop:
                     meta_signal  = meta.get("signal", "HOLD")
                     meta_conf    = meta.get("confidence", 0)
 
-                    # Alignment boost: both agree → +10% confidence
                     if brain_action == meta_signal and meta_signal != "HOLD":
-                        boosted_conf = min(100, meta_conf + 10)
                         meta = {
-                            **meta, "confidence": boosted_conf, "brain_boost": True,
+                            **meta, "confidence": min(100, meta_conf + 10), "brain_boost": True,
                             "brain_reason": f"Brain+Dreamer agreed → {meta_signal} | Brain {brain_conf:.0f}% conf +10 boost",
                         }
-                    # Fear circuit: brain fear > 0.7 → force HOLD
                     elif brain_fear > 0.70:
                         meta = {
                             **meta, "signal": "HOLD", "confidence": 0,
@@ -518,102 +536,51 @@ class TradingLoop:
                         }
                         logger.info("[TradingLoop][%s] Brain fear=%.2f → forced HOLD for %s",
                                     cycle_id, brain_fear, ticker)
-                    # Disagreement: brain says opposite → reduce confidence by 15%
                     elif brain_action != "HOLD" and brain_action != meta_signal:
-                        reduced_conf = max(0, meta_conf - 15)
                         meta = {
-                            **meta, "confidence": reduced_conf, "brain_disagree": True,
+                            **meta, "confidence": max(0, meta_conf - 15), "brain_disagree": True,
                             "brain_reason": f"Brain disagrees ({brain_action} vs Dreamer {meta_signal}) → −15 conf penalty",
                         }
                     else:
-                        # Brain neutral (HOLD) while dreamer has signal — note it
-                        meta = {
-                            **meta,
-                            "brain_reason": f"Brain neutral (HOLD) | Dreamer {meta_signal} {meta_conf:.0f}%",
-                        }
-
-                _upd(
-                    current_decision    = {
-                        **dreamer_dec, "meta": meta, "ticker": ticker,
-                        "brain": brain_block,
-                    },
-                    dreamer_signal      = dreamer_dec.get("direction", 0.0),
-                    dreamer_confidence  = dreamer_dec.get("confidence", 0),
-                    dreamer_weights     = dreamer_dec.get("strategy_weights", {}),
-                    dreamer_wm_loss     = dreamer_dec.get("wm_loss", 0.0),
-                    last_decision_time  = datetime.now(timezone.utc).isoformat(),
-                    status              = "scanning",
-                )
+                        meta = {**meta, "brain_reason": f"Brain neutral (HOLD) | Dreamer {meta_signal} {meta_conf:.0f}%"}
 
                 signal     = meta.get("signal", "HOLD")
                 confidence = meta.get("confidence", 0)
                 last_signal = signal
                 last_conf   = confidence
 
-                # Mode-aware confidence floor
-                try:
-                    from agents.execution_engine import MODE_LIVE as _MODE_LIVE
-                    conf_floor = META_CONFIDENCE_LIVE if engine._mode == _MODE_LIVE else META_CONFIDENCE_FLOOR
-                except Exception:
-                    conf_floor = META_CONFIDENCE_FLOOR
-
-                if signal in ("BUY", "SELL") and confidence >= conf_floor:
-                    qty       = risk_profile.get("quantity", 1) or 1
-                    atr14_val = ctx.get("atr14", live_price * 0.015)
-
-                    if signal == "BUY":
-                        sl_price = live_price - atr14_val * 2.0
-                        tp_price = live_price + atr14_val * 3.0
-                    else:
-                        sl_price = live_price + atr14_val * 2.0
-                        tp_price = live_price - atr14_val * 3.0
-
-                    risk_inr = risk_profile.get("final_risk_inr",
-                               risk_profile.get("risk_per_trade_pct", 1.0) / 100.0
-                               * prefs.allocated_capital)
-
-                    exec_result = engine.place_entry(
-                        ticker         = ticker,
-                        direction      = signal,
-                        quantity       = qty,
-                        entry_price    = live_price,
-                        sl_price       = max(0.01, sl_price),
-                        tp_price       = max(0.01, tp_price),
-                        confidence     = confidence,
-                        dreamer_signal = dreamer_dec.get("direction", 0.0),
-                        risk_inr       = risk_inr,
-                        strategy_meta  = meta,
-                        risk_profile   = risk_profile,
-                    )
-
-                    if exec_result.get("success"):
-                        placed_order = exec_result.get("order", {})
-                        with _lock:
-                            _state["daily_trades"] += 1
-                            _state["open_trade"]    = placed_order
-                            _state["status"]        = "trading"
-                        entries_this_cycle += 1
-                        try:
-                            from agents.telegram_notifier import notify_trade_opened
-                            notify_trade_opened(placed_order)
-                        except Exception:
-                            pass
-                        logger.info(
-                            "[TradingLoop][%s] ORDER PLACED | %s %s × %d @ ₹%.2f | "
-                            "SL=₹%.2f TP=₹%.2f | conf=%.0f%%",
-                            cycle_id, signal, ticker, qty,
-                            live_price, sl_price, tp_price, confidence
-                        )
-                    else:
-                        logger.info("[TradingLoop][%s] %s entry skipped: %s",
-                                    cycle_id, ticker, exec_result.get("error", "?"))
+                # Compute trade plan levels (for ALL tickers, not just executing ones)
+                atr14_val = ctx.get("atr14", live_price * 0.015)
+                if signal == "BUY":
+                    sl_price = live_price - atr14_val * 2.0
+                    tp_price = live_price + atr14_val * 3.0
+                elif signal == "SELL":
+                    sl_price = live_price + atr14_val * 2.0
+                    tp_price = live_price - atr14_val * 3.0
                 else:
-                    logger.info("[TradingLoop][%s] %s HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
-                                cycle_id, ticker, signal, confidence, conf_floor)
+                    sl_price = tp_price = 0.0
 
-                # ── Live DreamerV3 Experience Push ────────────────────────────
-                # Build obs from current market context and push to dreamer's
-                # replay buffer so it can learn from REAL market observations.
+                obs_entry.update({
+                    "signal":       signal,
+                    "confidence":   round(float(confidence), 1),
+                    "sl_price":     round(max(0.01, sl_price), 2) if signal != "HOLD" else None,
+                    "tp_price":     round(max(0.01, tp_price), 2) if signal != "HOLD" else None,
+                    "brain_reason": meta.get("brain_reason", ""),
+                })
+                watchlist_obs[ticker] = obs_entry
+
+                # Update global current_decision (last ticker processed)
+                _upd(
+                    current_decision   = {**dreamer_dec, "meta": meta, "ticker": ticker, "brain": brain_block},
+                    dreamer_signal     = dreamer_dec.get("direction", 0.0),
+                    dreamer_confidence = dreamer_dec.get("confidence", 0),
+                    dreamer_weights    = dreamer_dec.get("strategy_weights", {}),
+                    dreamer_wm_loss    = dreamer_dec.get("wm_loss", 0.0),
+                    last_decision_time = datetime.now(timezone.utc).isoformat(),
+                    status             = "scanning",
+                )
+
+                # Live DreamerV3 experience push (ALL tickers)
                 try:
                     from rl_agent.dreamer_trainer import push_live_experience, build_live_obs
                     cur_obs = build_live_obs(
@@ -625,41 +592,27 @@ class TradingLoop:
                         strategy_weights=list(dreamer_dec.get("strategy_weights", {}).values())[:12]
                             if dreamer_dec.get("strategy_weights") else None,
                     )
-
-                    # Map signal → action vector (dim 12: signal in dim-12 slot)
                     live_action = np.zeros(16, dtype=np.float32)
                     live_action[12] = (1.0 if signal == "BUY" else -1.0 if signal == "SELL" else 0.0)
-                    live_action[13] = 0.5   # SL ATR mid
-                    live_action[14] = 0.5   # TP ATR mid
-                    live_action[15] = confidence / 100.0  # exposure = confidence
-
-                    # Compute reward proxy: conf × direction alignment with context
+                    live_action[13] = 0.5
+                    live_action[14] = 0.5
+                    live_action[15] = confidence / 100.0
                     regime = ctx.get("regime", "UNKNOWN")
                     direction_ok = (
                         (signal == "BUY"  and regime == "UPTREND") or
                         (signal == "SELL" and regime == "DOWNTREND")
                     )
                     live_reward = (confidence / 100.0) * (1.0 if direction_ok else -0.5)
-
-                    # Push transition: prev_obs → cur_obs when available, else
-                    # bootstrap with a self-transition so live training starts
-                    # from the very FIRST scan cycle (no more STANDBY wait).
                     last_obs = self._live_last_obs.get(ticker)
                     push_live_experience(
                         ticker,
                         last_obs if last_obs is not None else cur_obs,
                         live_action, live_reward, cur_obs, done=0.0,
                     )
-
-                    # Always update "last" state for this ticker
                     self._live_last_obs[ticker]    = cur_obs
                     self._live_last_action[ticker] = live_action
                     self._live_last_price[ticker]  = live_price
-
-                    # ── Robot 3.0 Layer Evolution ─────────────────────────────
-                    # Propagate the SAME live reward signal to ALL brain layers
-                    # (psychology, strategy, meta, survival, risk-gate) so the
-                    # whole Robot 3.0 evolves together with DreamerV3.
+                    # Robot 3.0 Layer Evolution
                     try:
                         from agents.layer_evolution import layer_evolution
                         layer_evolution.evolve_from_live_training(
@@ -667,9 +620,105 @@ class TradingLoop:
                         )
                     except Exception as _ee:
                         logger.debug("[LayerEvo] evolve failed for %s: %s", ticker, _ee)
-
                 except Exception as _le:
                     logger.debug("[LiveTrain] push failed for %s: %s", ticker, _le)
+
+            # Update brain state from last observed ticker
+            if last_brain_block:
+                _upd(
+                    brain_active      = True,
+                    brain_action      = last_brain_block.get("action", "HOLD"),
+                    brain_confidence  = last_brain_block.get("confidence", 0.0),
+                    brain_fear        = last_brain_block.get("survival", {}).get("fear", 0.0),
+                    brain_regime      = last_brain_block.get("psych", {}).get("regime", ""),
+                    brain_last_decision = last_brain_block,
+                )
+
+            # Persist all watchlist observations into shared state
+            _upd(watchlist_observations=watchlist_obs)
+            logger.info("[TradingLoop][%s] Observation complete | %d tickers observed",
+                        cycle_id, len(watchlist_obs))
+
+            # ════════════════════════════════════════════════════════════════
+            # Step 8b: EXECUTE eligible tickers (max_parallel limit applies)
+            # Uses pre-computed observations — no redundant market data fetch.
+            # ════════════════════════════════════════════════════════════════
+            current_open_count = len(engine.get_open_positions())
+
+            try:
+                from agents.execution_engine import MODE_LIVE as _MODE_LIVE
+                conf_floor = META_CONFIDENCE_LIVE if engine._mode == _MODE_LIVE else META_CONFIDENCE_FLOOR
+            except Exception:
+                conf_floor = META_CONFIDENCE_FLOOR
+
+            for ticker in watchlist:
+                if current_open_count + entries_this_cycle >= max_parallel:
+                    logger.info("[TradingLoop][%s] Max parallel (%d) reached — execution stopped",
+                                cycle_id, max_parallel)
+                    break
+
+                obs = watchlist_obs.get(ticker, {})
+                # Skip if no observation, price unavailable, or already has position
+                if not obs or obs.get("error") or obs.get("has_position"):
+                    continue
+
+                signal     = obs.get("signal", "HOLD")
+                confidence = obs.get("confidence", 0)
+                live_price = obs.get("price", 0.0)
+
+                if signal not in ("BUY", "SELL") or confidence < conf_floor:
+                    logger.info("[TradingLoop][%s] %s HOLD | signal=%s conf=%.0f%% (floor=%.0f%%)",
+                                cycle_id, ticker, signal, confidence, conf_floor)
+                    continue
+
+                qty       = risk_profile.get("quantity", 1) or 1
+                sl_price  = obs.get("sl_price") or (live_price * 0.985)
+                tp_price  = obs.get("tp_price") or (live_price * 1.03)
+                risk_inr  = risk_profile.get("final_risk_inr",
+                            risk_profile.get("risk_per_trade_pct", 1.0) / 100.0 * prefs.allocated_capital)
+
+                exec_result = engine.place_entry(
+                    ticker         = ticker,
+                    direction      = signal,
+                    quantity       = qty,
+                    entry_price    = live_price,
+                    sl_price       = max(0.01, sl_price),
+                    tp_price       = max(0.01, tp_price),
+                    confidence     = confidence,
+                    dreamer_signal = obs.get("dreamer_dir", 0.0),
+                    risk_inr       = risk_inr,
+                    strategy_meta  = {
+                        "signal": signal, "confidence": confidence,
+                        "dreamer_signal": obs.get("dreamer_signal", "HOLD"),
+                        "tech_signal": "HOLD", "regime": obs.get("regime", "UNKNOWN"),
+                        "brain_reason": obs.get("brain_reason", ""),
+                    },
+                    risk_profile   = risk_profile,
+                )
+
+                if exec_result.get("success"):
+                    placed_order = exec_result.get("order", {})
+                    with _lock:
+                        _state["daily_trades"] += 1
+                        _state["open_trade"]    = placed_order
+                        _state["status"]        = "trading"
+                    # Mark ticker as now having a position in obs
+                    watchlist_obs[ticker]["has_position"] = True
+                    entries_this_cycle += 1
+                    try:
+                        from agents.telegram_notifier import notify_trade_opened
+                        notify_trade_opened(placed_order)
+                    except Exception:
+                        pass
+                    logger.info(
+                        "[TradingLoop][%s] ORDER PLACED | %s %s × %d @ ₹%.2f | "
+                        "SL=₹%.2f TP=₹%.2f | conf=%.0f%%",
+                        cycle_id, signal, ticker, qty,
+                        live_price, sl_price, tp_price, confidence
+                    )
+                else:
+                    logger.info("[TradingLoop][%s] %s entry skipped: %s",
+                                cycle_id, ticker, exec_result.get("error", "?"))
 
             # If no new entries and no current trades → scanning status
             final_open = engine.get_open_positions()

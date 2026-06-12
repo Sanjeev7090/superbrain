@@ -325,6 +325,9 @@ async def get_status():
     except Exception:
         s["layer_evolution"] = {"enabled": False}
 
+    # Attach watchlist observations (per-ticker signal + trade plan)
+    s["watchlist_observations"] = state.get("watchlist_observations", {})
+
     return {"success": True, **s}
 
 

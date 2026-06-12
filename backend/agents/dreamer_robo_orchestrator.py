@@ -377,6 +377,8 @@ _state: Dict = {
     "scan_mode":            "auto",       # auto | manual | hybrid
     "manual_tickers":       [],           # user-added tickers
     "top_picks":            [],           # top stocks from last scan
+    # ── Parallel Watchlist Observations ──────────────────────────────────────
+    "watchlist_observations": {},         # per-ticker: signal, price, trade plan, brain
 }
 
 _stop_evt   = threading.Event()
