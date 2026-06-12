@@ -912,7 +912,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-1.5">
                     <span className="text-[9px] font-black text-zinc-400 uppercase tracking-wider">
-                      Robot 3.0 · Layer Evolution
+                      Evolution
                     </span>
                     {isLayerEvolving && (
                       <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-ping" />
@@ -931,34 +931,46 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 </div>
 
                 <div className="space-y-1">
-                  {[
-                    { k: 'dreamer',       l: 'DreamerV3 RL',    c: '#34d399' },
-                    { k: 'psychology',    l: 'Psychology',       c: '#f472b6' },
-                    { k: 'strategy',      l: 'Strategy 6-Agent', c: '#60a5fa' },
-                    { k: 'mirofish_meta', l: 'MiroFish Meta',    c: '#a78bfa' },
-                    { k: 'survival',      l: 'Survival',         c: '#f59e0b' },
-                    { k: 'risk_gate',     l: 'Risk Gate',        c: '#f87171' },
-                  ].map(({ k, l, c }) => {
-                    const lay = le.layers?.[k] || {};
-                    const pct = lay.trust_pct ?? 50;
-                    return (
-                      <div key={k} className="flex items-center gap-1.5" data-testid={`layer-row-${k}`}>
-                        <span className="text-[8px] text-zinc-500 w-[72px] truncate">{l}</span>
-                        <div className="flex-1 h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
-                          <div
-                            className="h-full rounded-full transition-all duration-700"
-                            style={{ width: `${pct}%`, background: c }}
-                          />
-                        </div>
-                        <span className="text-[8px] font-bold w-[30px] text-right" style={{ color: c }}>
-                          {pct.toFixed(0)}%
-                        </span>
-                        <span className="text-[7px] text-zinc-600 w-[26px] text-right">
-                          ×{lay.updates ?? 0}
-                        </span>
-                      </div>
+                  {(() => {
+                    // Live Kronos confidence from brain's strategy agents
+                    const kronosAgent = rs?.brain_last_decision?.strategy_agents?.find(
+                      a => a.agent === 'KronosAI'
                     );
-                  })}
+                    const kronosPct = kronosAgent
+                      ? Math.round(kronosAgent.confidence)
+                      : (le.layers?.dreamer?.trust_pct ?? 0);
+                    const kronosUpdates = le.layers?.dreamer?.updates ?? 0;
+
+                    return [
+                      { k: 'kronos',        l: 'Kronos',           c: '#34d399', pct: kronosPct, upd: kronosUpdates },
+                      { k: 'psychology',    l: 'Psychology',       c: '#f472b6' },
+                      { k: 'strategy',      l: 'Strategy 6-Agent', c: '#60a5fa' },
+                      { k: 'mirofish_meta', l: 'MiroFish Meta',    c: '#a78bfa' },
+                      { k: 'survival',      l: 'Survival',         c: '#f59e0b' },
+                      { k: 'risk_gate',     l: 'Risk Gate',        c: '#f87171' },
+                    ].map(({ k, l, c, pct: overridePct, upd: overrideUpd }) => {
+                      const lay = le.layers?.[k] || {};
+                      const pct = overridePct ?? (lay.trust_pct ?? 50);
+                      const upd = overrideUpd ?? (lay.updates ?? 0);
+                      return (
+                        <div key={k} className="flex items-center gap-1.5" data-testid={`layer-row-${k}`}>
+                          <span className="text-[8px] text-zinc-500 w-[72px] truncate">{l}</span>
+                          <div className="flex-1 h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
+                            <div
+                              className="h-full rounded-full transition-all duration-700"
+                              style={{ width: `${pct}%`, background: c }}
+                            />
+                          </div>
+                          <span className="text-[8px] font-bold w-[30px] text-right" style={{ color: c }}>
+                            {typeof pct === 'number' ? pct.toFixed(0) : pct}%
+                          </span>
+                          <span className="text-[7px] text-zinc-600 w-[26px] text-right">
+                            ×{upd}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
 
                 <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-zinc-800/60">
@@ -972,7 +984,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
 
                 {!isLayerEvolving && (
                   <p className="text-[8px] text-zinc-600 mt-1">
-                    DreamerV3 live rewards will evolve all 6 brain layers — zero blind spots in trade decisions
+                    Kronos + 5 brain layers evolve on every live trade — zero blind spots
                   </p>
                 )}
               </div>
