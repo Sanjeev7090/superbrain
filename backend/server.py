@@ -9249,6 +9249,41 @@ async def analyze_minervini_vcp(request: MinerviniVCPRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Livermore Pivotal ─────────────────────────────────────────────────────────
+
+class LivermorePivotalRequest(BaseModel):
+    ticker: str
+
+@api_router.post("/strategy/livermore-pivotal")
+async def analyze_livermore_pivotal(request: LivermorePivotalRequest):
+    """
+    Jesse Livermore Pivotal Point Breakout scanner.
+    Fetches 300 days of daily OHLCV from yfinance and runs the scanner.
+    """
+    try:
+        from agents.livermore_pivotal import LivermorePivotalScanner
+        ticker = request.ticker.upper().strip()
+
+        stock = yf.Ticker(ticker)
+        raw   = stock.history(period="300d", interval="1d", auto_adjust=True)
+        if raw is None or len(raw) < 100:
+            raise HTTPException(status_code=400, detail=f"Not enough data for {ticker} (need 100+ daily bars)")
+
+        df = raw.rename(columns={"Open": "open", "High": "high", "Low": "low",
+                                  "Close": "close", "Volume": "volume"})
+        df = df[["open", "high", "low", "close", "volume"]].copy().dropna()
+
+        scanner = LivermorePivotalScanner()
+        result  = scanner.analyze_stock(df, ticker)
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Livermore Pivotal error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ======================= NARRATIVE SWING BACKTEST =======================
 
 def _bt_narrative_swing(closes, highs, lows, dates, max_exit=5,

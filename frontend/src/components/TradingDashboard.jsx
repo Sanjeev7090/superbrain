@@ -58,6 +58,7 @@ import SectorStocksSheet from './SectorStocksSheet';
 import TopMoversWidget from './TopMoversWidget';
 import MonteCarloPanel from './robo/MonteCarloPanel';
 import MinerviniVCPPanel from './MinerviniVCPPanel';
+import LivermorePivotalPanel from './LivermorePivotalPanel';
 import { Toaster, toast } from 'sonner';
 import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -891,6 +892,7 @@ const TradingDashboard = () => {
                   </div>
                   <div className="p-2 space-y-2">
                     <MinerviniVCPPanel selectedStock={selectedStock} />
+                    <LivermorePivotalPanel selectedStock={selectedStock} />
                   </div>
                 </div>
               </div>
