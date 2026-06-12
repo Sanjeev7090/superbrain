@@ -1,12 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { CaretUp, CaretDown } from '@phosphor-icons/react';
+import { useMultiTick } from '../hooks/useLiveTick';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// yfinance symbols for NSE indices
+const INDEX_WS_SYMBOLS = ["^NSEI", "^BSESN", "^NSEBANK"];
+
+// Map REST data key → WS symbol for merging
+const INDEX_WS_MAP = {
+  NIFTY:      "^NSEI",
+  SENSEX:     "^BSESN",
+  BANKNIFTY:  "^NSEBANK",
+};
+
 /**
  * Horizontal ticker bar showing live data for NIFTY 50, SENSEX, BANK NIFTY.
+ * Uses WebSocket tick streaming (2s updates) with REST fallback (15s).
  * Tapping any index calls `onIndexClick(symbol, name)` so the parent can
  * open a "Top Options" sheet for that index.
  */
@@ -14,6 +26,9 @@ const IndicesTickerBar = ({ onIndexClick }) => {
   const [indices, setIndices] = useState([]);
   const [loading, setLoading] = useState(true);
   const intervalRef = useRef(null);
+
+  // WebSocket live ticks — 2-second updates
+  const { ticks: wsTicks, connected: wsConnected } = useMultiTick(INDEX_WS_SYMBOLS);
 
   const fetchIndices = async () => {
     try {
@@ -28,7 +43,7 @@ const IndicesTickerBar = ({ onIndexClick }) => {
 
   useEffect(() => {
     fetchIndices();
-    intervalRef.current = setInterval(fetchIndices, 15000); // refresh every 15s
+    intervalRef.current = setInterval(fetchIndices, 15000); // REST fallback every 15s
     return () => clearInterval(intervalRef.current);
   }, []);
 
@@ -47,9 +62,26 @@ const IndicesTickerBar = ({ onIndexClick }) => {
       className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#0B0B0B] px-2 py-2 flex gap-2 overflow-x-auto scrollbar-none shrink-0 transition-colors duration-200"
       data-testid="indices-ticker-bar"
     >
+      {/* WebSocket live status dot */}
+      <div className="flex items-center self-center px-1" title={wsConnected ? 'Live WebSocket (2s)' : 'Polling (15s)'}>
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${wsConnected ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`}
+          data-testid="ws-live-dot"
+        />
+      </div>
+
       {indices.map((idx) => {
         const up = (idx.change || 0) >= 0;
         const supportsOptions = idx.symbol === 'NIFTY' || idx.symbol === 'BANKNIFTY' || idx.symbol === 'SENSEX';
+
+        // Merge WebSocket live tick if available
+        const wsSym  = INDEX_WS_MAP[idx.symbol];
+        const wsTick = wsSym ? wsTicks[wsSym] : null;
+        const price    = wsTick?.price      ?? idx.price;
+        const changePct = wsTick?.change_pct ?? idx.change_pct;
+        const isUp     = (changePct ?? 0) >= 0;
+        const isLive   = !!wsTick;
+
         return (
           <button
             key={idx.key}
@@ -66,21 +98,26 @@ const IndicesTickerBar = ({ onIndexClick }) => {
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-white/90 truncate">
                 {idx.name}
               </span>
-              {supportsOptions && (
-                <span className="text-[8px] font-mono text-[#00E676]/80 ml-1">OPT</span>
-              )}
+              <div className="flex items-center gap-1">
+                {isLive && (
+                  <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" title="Live tick" />
+                )}
+                {supportsOptions && (
+                  <span className="text-[8px] font-mono text-[#00E676]/80">OPT</span>
+                )}
+              </div>
             </div>
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-sm font-bold font-mono text-slate-900 dark:text-white tabular-nums">
-                {idx.price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                {price?.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
               </span>
               <span
                 className={`text-[10px] font-mono font-semibold flex items-center gap-0.5 ${
-                  up ? 'text-[#00E676]' : 'text-[#FF3D71]'
+                  isUp ? 'text-[#00E676]' : 'text-[#FF3D71]'
                 }`}
               >
-                {up ? <CaretUp size={9} weight="fill" /> : <CaretDown size={9} weight="fill" />}
-                {Math.abs(idx.change_pct || 0).toFixed(2)}%
+                {isUp ? <CaretUp size={9} weight="fill" /> : <CaretDown size={9} weight="fill" />}
+                {Math.abs(changePct || 0).toFixed(2)}%
               </span>
             </div>
           </button>

@@ -107,6 +107,25 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
 - **Handlers**: `handleScanStockSelect(stock)`, `handleScanAutoTrade(e, stock)`
 - **Visual**: Glow border, "IN ROBOT" pulse badge, spinner during load, play-button icon on AUTO TRADE
 
+### Phase 12 — NSE WebSocket Real Tick Data (Jun 2026)
+- **Backend**: `agents/tick_streamer.py` — `NSETickStreamer` singleton
+  - Single background task polls `yfinance fast_info` every 2 seconds
+  - Broadcasts to all connected WebSocket clients
+  - Thread pool (8 workers) for concurrent symbol fetches
+  - Auto-reconnect, dead connection cleanup
+- **Endpoint**: `GET /api/ws/nse-tick` WebSocket
+  - Subscribe: `{"action":"subscribe","tickers":["RELIANCE.NS","^NSEI","BANKNIFTY"]}`
+  - Receives: `{"type":"tick","ticker":"RELIANCE.NS","data":{price,change_pct,direction,...}}`
+- **Frontend hooks**: `hooks/useLiveTick.js`
+  - `useLiveTick(symbol)` — single symbol, auto-reconnect
+  - `useMultiTick(symbols[])` — multiple symbols, single WS connection
+- **Components**: `components/LiveTickBadge.jsx`
+  - `LiveTickBadge` — price + change% with flash animation
+  - `LiveTickInline` — compact inline badge with direction arrow
+- **Integrated into**:
+  - `IndicesTickerBar.jsx` — NIFTY/SENSEX/BANKNIFTY now update every 2s (was 15s), live green dot
+  - `RoboAdvisorDashboard.jsx` — Robot 3.0 header shows live price of active ticker
+
 ---
 
 ## Prioritized Backlog

@@ -28,6 +28,7 @@ import RoboControls             from './RoboControls';
 import TargetCapitalSettings    from './TargetCapitalSettings';
 import AgentDiscussionPanel     from './AgentDiscussionPanel';
 import WatchlistParallelPanel   from './WatchlistParallelPanel';
+import { LiveTickInline }       from '../LiveTickBadge';
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
 const fmt    = (v, d = 0) => v == null ? '—' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -716,6 +717,11 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                   <>
                     <span className="text-[9px] text-zinc-600">·</span>
                     <span className="text-[9px] font-mono text-zinc-400 truncate max-w-[80px]">{rs.ticker}</span>
+                    {/* Live WebSocket tick for active ticker */}
+                    <LiveTickInline
+                      symbol={rs.ticker}
+                      className="ml-0.5"
+                    />
                   </>
                 )}
               </div>

@@ -11884,3 +11884,45 @@ async def startup_binance_ws():
         logging.info("Robo-Trader preferences load task scheduled")
     except Exception as _re:
         logging.warning(f"Robo-Trader preferences load failed: {_re}")
+    # Start NSE Tick Streamer
+    try:
+        from agents.tick_streamer import nse_tick_streamer
+        await nse_tick_streamer.startup()
+        logging.info("NSE Tick Streamer started")
+    except Exception as _te:
+        logging.warning(f"NSE Tick Streamer startup failed: {_te}")
+
+
+# ── NSE Tick WebSocket ────────────────────────────────────────────────────────
+
+@app.websocket("/api/ws/nse-tick")
+async def ws_nse_tick(websocket: WebSocket):
+    """
+    Real-time NSE tick data over WebSocket.
+
+    Client sends:
+        {"action": "subscribe",   "tickers": ["RELIANCE.NS", "^NSEI", "BANKNIFTY"]}
+        {"action": "unsubscribe", "tickers": ["RELIANCE.NS"]}
+
+    Server sends:
+        {"type": "subscribed", "tickers": [...]}
+        {"type": "tick", "ticker": "RELIANCE.NS",
+         "data": {"price":1293.5,"change":12.3,"change_pct":0.96,
+                  "high":1300,"low":1260,"volume":9876543,
+                  "direction":"up","ts":"2026-01-01T09:15:00Z"}}
+    """
+    from agents.tick_streamer import nse_tick_streamer
+    await nse_tick_streamer.connect(websocket)
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            action  = msg.get("action", "")
+            tickers = msg.get("tickers", [])
+            if action == "subscribe":
+                await nse_tick_streamer.subscribe(websocket, tickers)
+            elif action == "unsubscribe":
+                await nse_tick_streamer.unsubscribe(websocket, tickers)
+    except Exception:
+        pass
+    finally:
+        await nse_tick_streamer.disconnect(websocket)
