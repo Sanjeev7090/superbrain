@@ -257,11 +257,13 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const [dangerScanning, setDangerScanning] = useState(false);
 
   // Universe Scan state
-  const [scanOpen,     setScanOpen]     = useState(false);
-  const [scanLoading,  setScanLoading]  = useState(false);
-  const [scanResults,  setScanResults]  = useState(null);
-  const [scanSegment,  setScanSegment]  = useState('all');
-  const [scanTab,      setScanTab]      = useState('buys'); // buys | sells
+  const [scanOpen,          setScanOpen]          = useState(false);
+  const [scanLoading,       setScanLoading]        = useState(false);
+  const [scanResults,       setScanResults]        = useState(null);
+  const [scanSegment,       setScanSegment]        = useState('all');
+  const [scanTab,           setScanTab]            = useState('buys'); // buys | sells
+  const [scanSelectedTicker, setScanSelectedTicker] = useState(null);
+  const [scanLoadingTicker, setScanLoadingTicker]  = useState(null);
 
   const pollRef = useRef(null);
 
@@ -525,6 +527,47 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
       toast.error('Scan failed: ' + (e.response?.data?.detail || e.message));
     } finally {
       setScanLoading(false);
+    }
+  };
+
+  // ── Scan stock select → load in Robot 3.0 ────────────────────────────────
+  const handleScanStockSelect = async (stock) => {
+    if (scanLoadingTicker) return; // prevent double-click
+    setScanLoadingTicker(stock.ticker);
+
+    // 1. Load in chart
+    if (onSelectStock) {
+      onSelectStock({ ticker: stock.ticker, name: stock.name, type: stock.segment === 'fo' ? 'FO' : 'EQUITY' });
+    }
+
+    try {
+      // 2. Save ticker to backend so Robot 3.0 header updates
+      await axios.post(`${API}/robo/settings`, {
+        daily_profit_target: settings.daily_profit_target,
+        allocated_capital:   settings.allocated_capital,
+        ticker:              stock.ticker,
+        risk_tolerance:      settings.risk_tolerance,
+      });
+
+      // 3. Fire brain decision for this stock immediately
+      const symbol = stock.ticker.replace('.NS', '').replace('.BO', '');
+      const brRes = await axios.post(`${API}/hybrid-brain/decide`, { symbol });
+      setBrainDecision(brRes.data);
+
+      // 4. Refresh Robot 3.0 state (header ticker updates via fetchAll)
+      await fetchAll();
+
+      setScanSelectedTicker(stock.ticker);
+      setSettings(p => ({ ...p, ticker: stock.ticker }));
+
+      toast.success(
+        `${symbol} loaded → Brain: ${brRes.data.action} ${brRes.data.confidence?.toFixed(1)}%`,
+        { duration: 3000, icon: '🤖' }
+      );
+    } catch (e) {
+      toast.error('Load failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setScanLoadingTicker(null);
     }
   };
 
@@ -976,32 +1019,31 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                         </div>
                       ) : (
                         <div className="p-2 space-y-1.5">
-                          {(scanTab === 'buys' ? scanResults.buys : scanResults.sells)?.map((stock, idx) => (
+                          {(scanTab === 'buys' ? scanResults.buys : scanResults.sells)?.map((stock, idx) => {
+                            const isSelected = scanSelectedTicker === stock.ticker;
+                            const isThisLoading = scanLoadingTicker === stock.ticker;
+                            return (
                             <div
                               key={stock.ticker}
-                              className="rounded-lg px-2.5 py-2 border transition-all hover:border-zinc-600 cursor-pointer group"
+                              data-testid={`scan-stock-card-${stock.ticker.replace('.NS','')}`}
+                              className="rounded-lg px-2.5 py-2 border transition-all cursor-pointer relative overflow-hidden"
                               style={{
-                                background: stock.action === 'BUY'
-                                  ? 'rgba(16,185,129,0.05)'
-                                  : 'rgba(239,68,68,0.05)',
-                                borderColor: stock.action === 'BUY'
-                                  ? 'rgba(16,185,129,0.15)'
-                                  : 'rgba(239,68,68,0.15)',
+                                background: isSelected
+                                  ? (stock.action === 'BUY' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)')
+                                  : (stock.action === 'BUY' ? 'rgba(16,185,129,0.05)' : 'rgba(239,68,68,0.05)'),
+                                borderColor: isSelected
+                                  ? (stock.action === 'BUY' ? 'rgba(16,185,129,0.5)' : 'rgba(239,68,68,0.5)')
+                                  : (stock.action === 'BUY' ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'),
+                                boxShadow: isSelected ? (stock.action === 'BUY' ? '0 0 8px rgba(16,185,129,0.2)' : '0 0 8px rgba(239,68,68,0.2)') : 'none',
                               }}
-                              onClick={() => {
-                                if (onSelectStock) {
-                                  onSelectStock({ ticker: stock.ticker, name: stock.name, type: stock.segment === 'fo' ? 'FO' : 'EQUITY' });
-                                }
-                                setSettings(p => ({ ...p, ticker: stock.ticker.replace('.NS', '') }));
-                                toast.success(`Ticker set → ${stock.ticker.replace('.NS', '')}`, { duration: 1500 });
-                              }}
+                              onClick={() => handleScanStockSelect(stock)}
                             >
                               <div className="flex items-center justify-between gap-2">
                                 {/* Left: rank + ticker + name */}
                                 <div className="flex items-center gap-2 min-w-0">
                                   <span className="text-[8px] text-zinc-600 font-mono w-4 shrink-0">#{idx + 1}</span>
                                   <div className="min-w-0">
-                                    <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="text-[10px] font-black text-white truncate">
                                         {stock.ticker.replace('.NS', '')}
                                       </span>
@@ -1015,6 +1057,21 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                                       >
                                         {stock.segment === 'fo' ? 'F&O' : stock.segment === 'banknifty' ? 'BNF' : 'EQ'}
                                       </span>
+                                      {/* LOADING spinner */}
+                                      {isThisLoading && (
+                                        <span className="w-2.5 h-2.5 border border-zinc-500 border-t-emerald-400 rounded-full animate-spin" />
+                                      )}
+                                      {/* LOADED badge */}
+                                      {isSelected && !isThisLoading && (
+                                        <span
+                                          data-testid={`scan-loaded-badge-${stock.ticker.replace('.NS','')}`}
+                                          className="text-[7px] font-black px-1 py-0.5 rounded flex items-center gap-0.5 animate-pulse"
+                                          style={{ background: 'rgba(16,185,129,0.2)', color: '#34d399', border: '1px solid rgba(16,185,129,0.4)' }}
+                                        >
+                                          <span className="w-1 h-1 rounded-full bg-emerald-400 inline-block" />
+                                          IN ROBOT
+                                        </span>
+                                      )}
                                     </div>
                                     <p className="text-[8px] text-zinc-500 truncate">{stock.name}</p>
                                   </div>
@@ -1032,7 +1089,7 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                                       SMC {stock.smc_signal}
                                     </span>
                                     <span className="text-[7px] text-violet-400 bg-violet-900/20 px-1 rounded">
-                                      ⏱ {stock.kronos_phase?.replace('_', ' ')}
+                                      {stock.kronos_phase?.replace('_', ' ')}
                                     </span>
                                   </div>
 
@@ -1074,8 +1131,16 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                                   R:R {stock.rr_ratio}x
                                 </span>
                               </div>
+
+                              {/* Load hint — only show when NOT selected */}
+                              {!isSelected && !isThisLoading && (
+                                <p className="text-[7px] text-zinc-700 mt-1 text-center">
+                                  Tap to load in Robot 3.0
+                                </p>
+                              )}
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
