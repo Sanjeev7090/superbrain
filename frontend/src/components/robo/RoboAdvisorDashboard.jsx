@@ -571,6 +571,65 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
     }
   };
 
+  // ── Scan stock → one-click Auto Trade ────────────────────────────────────
+  const handleScanAutoTrade = async (e, stock) => {
+    e.stopPropagation(); // don't trigger card select
+    if (scanLoadingTicker) return;
+    setScanLoadingTicker(stock.ticker);
+
+    // 1. Load in chart
+    if (onSelectStock) {
+      onSelectStock({ ticker: stock.ticker, name: stock.name, type: stock.segment === 'fo' ? 'FO' : 'EQUITY' });
+    }
+
+    try {
+      const symbol = stock.ticker.replace('.NS', '').replace('.BO', '');
+
+      // 2. Save ticker to backend
+      await axios.post(`${API}/robo/settings`, {
+        daily_profit_target: settings.daily_profit_target,
+        allocated_capital:   settings.allocated_capital,
+        ticker:              stock.ticker,
+        risk_tolerance:      settings.risk_tolerance,
+      });
+
+      // 3. If auto mode already running, stop it first then restart with new ticker
+      if (roboState?.auto_mode) {
+        await axios.post(`${API}/robo/stop`);
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      // 4. Start auto mode with this ticker
+      await axios.post(`${API}/robo/start`, {
+        ticker:           stock.ticker,
+        interval_minutes: intervalMin,
+      });
+
+      // 5. Fire brain decision in background
+      setTimeout(async () => {
+        try {
+          const brRes = await axios.post(`${API}/hybrid-brain/decide`, { symbol });
+          setBrainDecision(brRes.data);
+        } catch { /* silent */ }
+      }, 1500);
+
+      // 6. Refresh state
+      await fetchAll();
+
+      setScanSelectedTicker(stock.ticker);
+      setSettings(p => ({ ...p, ticker: stock.ticker }));
+
+      toast.success(
+        `AUTO TRADE started → ${symbol} | ${stock.action} ${stock.confidence.toFixed(0)}%`,
+        { duration: 4000, icon: '⚡' }
+      );
+    } catch (e) {
+      toast.error('Auto Trade failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setScanLoadingTicker(null);
+    }
+  };
+
   // ── Derived ────────────────────────────────────────────────────────────────
   const rs          = roboState;
   const rp          = rs?.risk_profile || {};
@@ -1132,12 +1191,44 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                                 </span>
                               </div>
 
-                              {/* Load hint — only show when NOT selected */}
-                              {!isSelected && !isThisLoading && (
-                                <p className="text-[7px] text-zinc-700 mt-1 text-center">
-                                  Tap to load in Robot 3.0
-                                </p>
-                              )}
+                              {/* AUTO TRADE button row */}
+                              <div className="flex items-center gap-2 mt-1.5">
+                                {/* Load hint — only show when NOT selected */}
+                                {!isSelected && !isThisLoading && (
+                                  <p className="text-[7px] text-zinc-700 flex-1">Tap to load in Robot 3.0</p>
+                                )}
+                                {isSelected && !isThisLoading && (
+                                  <p className="text-[7px] text-emerald-600 flex-1">Loaded in Robot 3.0</p>
+                                )}
+                                <button
+                                  data-testid={`scan-auto-trade-btn-${stock.ticker.replace('.NS','')}`}
+                                  disabled={!!isThisLoading}
+                                  onClick={(e) => handleScanAutoTrade(e, stock)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                  style={{
+                                    background: isThisLoading
+                                      ? 'rgba(107,114,128,0.2)'
+                                      : stock.action === 'BUY'
+                                        ? 'rgba(16,185,129,0.2)'
+                                        : 'rgba(239,68,68,0.2)',
+                                    color: isThisLoading
+                                      ? '#6b7280'
+                                      : stock.action === 'BUY' ? '#34d399' : '#f87171',
+                                    border: `1px solid ${isThisLoading ? 'rgba(107,114,128,0.3)' : stock.action === 'BUY' ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+                                  }}
+                                >
+                                  {isThisLoading ? (
+                                    <span className="w-2 h-2 border border-zinc-500 border-t-emerald-400 rounded-full animate-spin" />
+                                  ) : (
+                                    <>
+                                      <svg viewBox="0 0 24 24" className="w-2.5 h-2.5" fill="currentColor">
+                                        <polygon points="5,3 19,12 5,21" />
+                                      </svg>
+                                      AUTO TRADE
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             );
                           })}

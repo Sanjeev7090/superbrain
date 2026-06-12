@@ -100,12 +100,12 @@ Clone trading app → Add dark/light mode, mobile responsiveness, MiroFish LangG
   `current_price`, `unrealized_pnl`, `pnl_pct`, `price_change` (15s cache via yfinance)
 - **Watchlist Clear Fix**: `removeFromWatchlist` immediately POSTs to backend (no save-required)
 
-### Phase 11 — Universe Scan → Robot 3.0 One-Click Load (Jun 2026)
+### Phase 11 — Universe Scan → Robot 3.0 One-Click Load + AUTO TRADE (Jun 2026)
 - **Feature**: Clicking any stock in Universe Scan results instantly loads it into Robot 3.0
-- **Flow**: Click stock card → `POST /api/robo/settings` saves ticker to DB → `POST /api/hybrid-brain/decide` fires brain analysis → `fetchAll()` refreshes Robot 3.0 header → "IN ROBOT" pulsing badge on card
-- **New state**: `scanSelectedTicker`, `scanLoadingTicker` — prevent double-click, show spinner while loading
-- **Visual**: Selected card gets green/red glow border, "IN ROBOT" pulsing badge, loading spinner during save
-- **Handler**: `handleScanStockSelect(stock)` — async, saves settings + fires brain in parallel
+- **Flow (Load)**: Click card → save ticker to DB → fire brain decision → refresh Robot 3.0 → "IN ROBOT" badge
+- **Flow (AUTO TRADE button)**: Click ▶ AUTO TRADE → save ticker → stop existing auto mode if running → start auto mode with new ticker → fire brain decision → toast
+- **Handlers**: `handleScanStockSelect(stock)`, `handleScanAutoTrade(e, stock)`
+- **Visual**: Glow border, "IN ROBOT" pulse badge, spinner during load, play-button icon on AUTO TRADE
 
 ---
 
