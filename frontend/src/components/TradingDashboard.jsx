@@ -60,6 +60,7 @@ import MonteCarloPanel from './robo/MonteCarloPanel';
 import MinerviniVCPPanel from './MinerviniVCPPanel';
 import LivermorePivotalPanel from './LivermorePivotalPanel';
 import CANSLIMPanel from './CANSLIMPanel';
+import PaulTudorPanel from './PaulTudorPanel';
 import { Toaster, toast } from 'sonner';
 import { Star, Wallet, Bell, ChartLineUp, List, CurrencyBtc, Lightning, Newspaper, Sun, Moon } from '@phosphor-icons/react';
 import { useTheme } from '../context/ThemeContext';
@@ -943,6 +944,7 @@ const TradingDashboard = () => {
                   <MinerviniVCPPanel selectedStock={selectedStock} />
                   <LivermorePivotalPanel selectedStock={selectedStock} />
                   <CANSLIMPanel selectedStock={selectedStock} />
+                  <PaulTudorPanel selectedStock={selectedStock} />
                 </div>
               </div>
             )}
