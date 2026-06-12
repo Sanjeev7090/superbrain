@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import logging
 import math
 import os
 import random
@@ -46,6 +45,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 
 log = logging.getLogger("robo_router")
+logger = logging.getLogger(__name__)
 
 from . import dreamer_robo_orchestrator as orch
 from .risk_portfolio_manager import (
@@ -62,6 +62,12 @@ except Exception as _lol_e:
     _live_obs_loop = None
     logger.warning("LiveObservationLoop unavailable: %s", _lol_e)
 
+# Central brain — same singleton used by trading_loop
+try:
+    from .trading_loop import brain as _brain
+except Exception:
+    from .hybrid_super_brain import hybrid_brain as _brain
+
 
 def _maybe_start_obs_loop(tickers):
     """Auto-start / update live observation loop for given tickers (non-blocking)."""
@@ -74,7 +80,6 @@ def _maybe_start_obs_loop(tickers):
         except Exception as _e:
             logger.debug("LiveObsLoop start failed: %s", _e)
 
-logger = logging.getLogger(__name__)
 
 robo_router = APIRouter(prefix="/api/robo", tags=["Robo Trader — Phase 2"])
 
@@ -396,7 +401,7 @@ async def start_auto_mode(req: StartRequest):
 
         async def _warmup_brain():
             try:
-                from .hybrid_super_brain import hybrid_brain
+                hybrid_brain = _brain
                 from .dreamer_robo_orchestrator import _prefs, _upd
                 ticker = req.ticker or _prefs.ticker or "NIFTY"
                 symbol = ticker.replace(".NS", "").replace(".BO", "").upper()
