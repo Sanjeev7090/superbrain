@@ -641,11 +641,15 @@ class TradingLoop:
                     )
                     live_reward = (confidence / 100.0) * (1.0 if direction_ok else -0.5)
 
-                    # If we had a last obs for this ticker → push full transition
+                    # Push transition: prev_obs → cur_obs when available, else
+                    # bootstrap with a self-transition so live training starts
+                    # from the very FIRST scan cycle (no more STANDBY wait).
                     last_obs = self._live_last_obs.get(ticker)
-                    if last_obs is not None:
-                        push_live_experience(ticker, last_obs, live_action,
-                                             live_reward, cur_obs, done=0.0)
+                    push_live_experience(
+                        ticker,
+                        last_obs if last_obs is not None else cur_obs,
+                        live_action, live_reward, cur_obs, done=0.0,
+                    )
 
                     # Always update "last" state for this ticker
                     self._live_last_obs[ticker]    = cur_obs

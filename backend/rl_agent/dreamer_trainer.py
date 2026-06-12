@@ -139,6 +139,54 @@ _state.update({
     "live_tickers":      [],   # which tickers sent live data this session
 })
 
+# Mini-train can fire with a small batch — live data arrives slowly (1 per
+# ticker per scan cycle), waiting for a full BATCH_SIZE would stall training.
+MIN_LIVE_BATCH = 16
+
+# ─── Live stats persistence (survive backend restarts / hot reloads) ──────────
+_LIVE_STATS_PERSIST_SEC  = 10.0
+_live_stats_last_persist = 0.0
+
+
+def _live_stats_coll():
+    from pymongo import MongoClient
+    url  = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
+    name = os.environ.get("DB_NAME", "trading_db")
+    return MongoClient(url, serverSelectionTimeoutMS=2000)[name]["dreamer_live_stats"]
+
+
+def _persist_live_stats():
+    global _live_stats_last_persist
+    now = time.time()
+    if now - _live_stats_last_persist < _LIVE_STATS_PERSIST_SEC:
+        return
+    _live_stats_last_persist = now
+    try:
+        with _lock:
+            doc = {k: _state.get(k) for k in
+                   ("live_exp_count", "live_train_steps", "live_wm_loss", "live_tickers")}
+        _live_stats_coll().update_one({"_id": "main"}, {"$set": doc}, upsert=True)
+    except Exception as e:
+        logger.debug("[LiveTrain] stats persist skipped: %s", e)
+
+
+def _load_live_stats():
+    try:
+        doc = _live_stats_coll().find_one({"_id": "main"})
+        if doc:
+            with _lock:
+                _state["live_exp_count"]   = int(doc.get("live_exp_count", 0))
+                _state["live_train_steps"] = int(doc.get("live_train_steps", 0))
+                _state["live_wm_loss"]     = float(doc.get("live_wm_loss", 0.0))
+                _state["live_tickers"]     = list(doc.get("live_tickers", []))
+            logger.info("[LiveTrain] Restored live stats — %d experiences, %d train steps",
+                        _state["live_exp_count"], _state["live_train_steps"])
+    except Exception as e:
+        logger.debug("[LiveTrain] stats restore skipped: %s", e)
+
+
+_load_live_stats()
+
 
 def _upd(**kw):
     with _lock:
@@ -253,7 +301,14 @@ def push_live_experience(
         action = np.pad(action, (0, 16 - len(action)), constant_values=0.0)
     action = action[:16].astype(np.float32)
 
-    kf = kronos_feat if kronos_feat is not None else np.zeros(128, dtype=np.float32)
+    # Kronos feature must match KRONOS_FEAT_DIM (7) — pad/clip defensively
+    if kronos_feat is None:
+        kf = np.zeros(KRONOS_FEAT_DIM, dtype=np.float32)
+    else:
+        kf = np.asarray(kronos_feat, dtype=np.float32).flatten()
+        if len(kf) < KRONOS_FEAT_DIM:
+            kf = np.pad(kf, (0, KRONOS_FEAT_DIM - len(kf)))
+        kf = kf[:KRONOS_FEAT_DIM]
 
     with _live_exp_lock:
         _live_exp_deque.append((
@@ -284,9 +339,13 @@ def push_live_experience(
         buf.push(obs, action, float(reward), next_obs, float(done), kronos_feat=kf)
 
     # ── Mini-training step if we have enough data ─────────────────────────────
+    # Fires whenever the main training thread is NOT running (it drains the
+    # deque itself) — works even from 'idle' status so live evolution never stalls.
     status = _state.get("status", "idle")
-    if buf is not None and len(buf) >= BATCH_SIZE and status in ("running", "paused"):
+    if buf is not None and len(buf) >= MIN_LIVE_BATCH and status != "training":
         _trigger_live_mini_train(buf)
+
+    _persist_live_stats()
 
     logger.debug("[LiveExp] ticker=%s exp#%d reward=%.4f buf_size=%d",
                  ticker, _state.get("live_exp_count", 0), reward,
@@ -315,7 +374,7 @@ def _trigger_live_mini_train(buf):
                         pass
             agent = _live_agent
 
-        batch = buf.sample(BATCH_SIZE)
+        batch = buf.sample(min(len(buf), BATCH_SIZE))
         if len(batch) == 8:   # PER batch
             obs_b, act_b, rew_b, nobs_b, done_b, kfeat_b, _, _ = batch
         else:
