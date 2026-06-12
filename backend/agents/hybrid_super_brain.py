@@ -391,12 +391,15 @@ class HybridSuperBrain:
 
         # ── Step 7: Hybrid scoring engine ───────────────────────────────────
         decision = self._hybrid_engine(
-            symbol=symbol,
-            base_conf=base_conf,
+            dreamer={"confidence": base_conf},
             psych=psych,
             meta=meta,
             survival=survival,
+            market_data=md,
         )
+        # Preserve symbol + id for audit trail
+        decision.setdefault("id", str(uuid4()))
+        decision.setdefault("symbol", symbol)
 
         # ── Step 8: Risk gate ────────────────────────────────────────────────
         risk_ok, risk_reason = await self._check_risk_gate()
@@ -422,93 +425,35 @@ class HybridSuperBrain:
         return {**decision, "cached": False}
 
     # ── Hybrid Scoring Engine ─────────────────────────────────────────────────
-    def _hybrid_engine(
-        self,
-        symbol: str,
-        base_conf: float,
-        psych: Dict,
-        meta: Dict,
-        survival: Dict,
-    ) -> Dict[str, Any]:
-        # ── Layer-Evolution adaptive coefficients (trained live by DreamerV3) ──
-        try:
-            from .layer_evolution import layer_evolution
-            coef = layer_evolution.get_coefficients()
-        except Exception:
-            coef = {"fomo": 12.0, "apathy": 5.0, "regime": 4.0, "fear": 15.0,
-                    "meta_scale": 1.0, "dreamer_scale": 1.0}
+    def _hybrid_engine(self, dreamer, psych, meta, survival, market_data) -> Dict:
+        base_conf = dreamer.get('confidence', 50)
+        final_conf = (base_conf * 0.45) + (psych["fomo_score"] * 15) - (survival["fear"] * 12)
+        final_conf *= meta.get("confidence_adjust", 1.0)
+        final_conf = max(20, min(95, final_conf))
 
-        base_eff     = 50.0 + (base_conf - 50.0) * coef["dreamer_scale"]
-        fomo_boost   = psych["fomo_score"] * coef["fomo"]
-        apathy_drag  = psych["apathy_score"] * coef["apathy"]
-        fear_penalty = survival["fear"] * coef["fear"]
-        cred_factor  = 0.65 if psych["narrative_credibility"] < 0.5 else 1.0
-        regime_bonus = (
-            coef["regime"] if psych["regime"].startswith("trending")
-            else -3.0 if psych["regime"] == "volatile"
-            else 0.0
+        # High Quality Filter (Accuracy Protector)
+        quality_score = (
+            market_data.get('deltadash_total', 0) * 0.4 +
+            market_data.get('oi_score', 50) * 0.3 +
+            (1 if abs(market_data.get('parity_mispricing', 0)) < 1.2 else 0) * 30
         )
 
-        raw_conf = (base_eff + fomo_boost + regime_bonus - apathy_drag - fear_penalty) * cred_factor
-        # Apply meta-reasoner adjustment, scaled by evolved meta-layer trust
-        meta_adj = 1.0 + (meta.get("confidence_adjust", 1.0) - 1.0) * coef["meta_scale"]
-        raw_conf *= meta_adj
-        final_conf = max(15.0, min(98.0, raw_conf))
-
-        # Action selection (circuit breakers first)
-        if survival["fear"] > 0.80:
-            action = "HOLD"
-            reason_suffix = " | CIRCUIT-BREAKER: extreme fear"
-        elif meta.get("asymmetric_edge") and final_conf > 65:
+        if final_conf > 58 and quality_score >= 65:
             action = "BUY"
-            reason_suffix = " | ASYMMETRIC-EDGE confirmed"
-        elif final_conf > 68 and psych["regime"] != "trending_down":
-            action = "BUY"
-            reason_suffix = ""
-        elif final_conf < 40 or psych["regime"] == "trending_down":
+        elif final_conf < 40 and quality_score >= 65:
             action = "SELL"
-            reason_suffix = ""
         else:
             action = "HOLD"
-            reason_suffix = ""
-
-        # Position size scalar
-        size_scalar = 1.0
-        if action == "BUY":
-            size_scalar = (1.0 + 0.4 * psych["fomo_score"]) * (1.0 - 0.5 * survival["fear"])
-            # Meta agreement boost
-            if meta.get("agreement_score", 0) >= 2:
-                size_scalar *= 1.15
-            size_scalar = max(0.25, min(1.75, size_scalar))
 
         return {
-            "id":         str(uuid4()),
-            "symbol":     symbol,
-            "action":     action,
+            "action": action,
             "confidence": round(final_conf, 1),
-            "size_scalar": round(size_scalar, 3),
-            "components": {
-                "dreamer_base":       round(base_conf, 1),
-                "fomo_boost":         round(fomo_boost, 2),
-                "regime_bonus":       round(regime_bonus, 2),
-                "apathy_drag":        round(-apathy_drag, 2),
-                "fear_penalty":       round(-fear_penalty, 2),
-                "credibility_factor": round(cred_factor, 2),
-                "meta_adjust":        round(meta_adj, 3),
-            },
-            "layer_coefficients": coef,
-            "psych":      psych,
-            "survival":   survival,
-            "reasoning": (
-                f"FOMO {psych['fomo_score']:.2f} · Regime {psych['regime']} · "
-                f"Cred {psych['narrative_credibility']:.2f} · Fear {survival['fear']:.2f} · "
-                f"Dreamer {base_conf:.0f} · Meta×{meta.get('confidence_adjust',1):.2f}"
-                + reason_suffix
-            ),
-            "risk_alert": survival["status"],
-            "timestamp":  datetime.now(timezone.utc).isoformat(),
+            "quality_score": round(quality_score, 1),
+            "reasoning": f"Conf:{final_conf:.1f} | Delta:{market_data.get('deltadash_total',0)} | Quality:{quality_score:.1f}",
+            "psych":    psych,
+            "survival": survival,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-
     # ── StrategyCollaborator Runner ───────────────────────────────────────────
     async def _run_strategy(self, symbol: str):
         """Run StrategyCollaborator in thread pool (sync → async)."""
