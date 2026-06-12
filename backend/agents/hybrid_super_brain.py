@@ -330,6 +330,7 @@ class HybridSuperBrain:
         self.current_pnl_pct  = 0.0
         self._decision_cache: Dict[str, tuple] = {}   # symbol → (decision, ts)
         self._cache_ttl = 60.0
+        self.brain_enabled: bool = True  # ON/OFF toggle
 
     # ── Public API ────────────────────────────────────────────────────────────
 

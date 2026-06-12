@@ -249,6 +249,8 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
   const [brainAudit,    setBrainAudit]    = useState([]);
   const [brainLoading,  setBrainLoading]  = useState(false);
   const [brainTab,      setBrainTab]      = useState('state'); // state | audit
+  const [brainEnabled,  setBrainEnabled]  = useState(true);   // ON/OFF toggle
+  const [brainToggling, setBrainToggling] = useState(false);
 
   // Danger mode picks
   const [dangerPicks, setDangerPicks]     = useState([]);
@@ -310,7 +312,12 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
         });
       }
       // Brain
-      if (brSt.data) setBrainState(brSt.data);
+      if (brSt.data) {
+        setBrainState(brSt.data);
+        if (typeof brSt.data.brain_enabled === 'boolean') {
+          setBrainEnabled(brSt.data.brain_enabled);
+        }
+      }
       if (brAudit.data?.decisions) setBrainAudit(brAudit.data.decisions);
 
       setLastRefresh(new Date());
@@ -454,6 +461,22 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
       toast.error('Brain decide failed: ' + (e.response?.data?.detail || e.message));
     } finally {
       setBrainLoading(false);
+    }
+  };
+
+  const handleBrainToggle = async () => {
+    setBrainToggling(true);
+    try {
+      const newEnabled = !brainEnabled;
+      const res = await axios.post(`${API}/hybrid-brain/toggle`, { enabled: newEnabled });
+      setBrainEnabled(res.data.brain_enabled);
+      toast.success(res.data.brain_enabled ? '🧠 Hybrid Brain ON' : '🔕 Hybrid Brain OFF', {
+        duration: 2500,
+      });
+    } catch (e) {
+      toast.error('Brain toggle failed: ' + (e.response?.data?.detail || e.message));
+    } finally {
+      setBrainToggling(false);
     }
   };
 
@@ -699,45 +722,82 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
               onSetInterval={handleSetInterval}
             />
 
-            {/* Brain live status strip — visible when auto mode running */}
-            {isActive && (
-              <div
-                className="mt-3 rounded-xl px-3 py-2 border flex items-center gap-3"
-                style={{ background: 'rgba(139,92,246,0.06)', borderColor: 'rgba(139,92,246,0.2)' }}
-                data-testid="brain-live-strip"
-              >
-                {/* Pulsing brain indicator */}
-                <div className="relative flex-shrink-0">
-                  <div
-                    className="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black"
-                    style={{ background: isBrainActive ? 'rgba(139,92,246,0.3)' : 'rgba(63,63,70,0.5)', color: isBrainActive ? '#c4b5fd' : '#52525b' }}
-                  >
-                    HSB
+            {/* HSB — Hybrid Brain Toggle (always visible) */}
+            <div
+              className="mt-3 rounded-xl px-3 py-2.5 border flex items-center gap-3"
+              style={{
+                background: brainEnabled ? 'rgba(139,92,246,0.08)' : 'rgba(24,24,27,0.6)',
+                borderColor: brainEnabled ? 'rgba(139,92,246,0.3)' : 'rgba(63,63,70,0.4)',
+              }}
+              data-testid="brain-live-strip"
+            >
+              {/* Pulsing brain indicator */}
+              <div className="relative flex-shrink-0">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center text-[9px] font-black"
+                  style={{
+                    background: brainEnabled && isBrainActive ? 'rgba(139,92,246,0.35)' : brainEnabled ? 'rgba(139,92,246,0.15)' : 'rgba(63,63,70,0.4)',
+                    color: brainEnabled ? '#c4b5fd' : '#52525b',
+                  }}
+                >
+                  HSB
+                </div>
+                {brainEnabled && isBrainActive && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-violet-400 animate-ping" />
+                )}
+              </div>
+
+              {/* Label + decision info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-[9px] font-bold" style={{ color: brainEnabled ? '#c4b5fd' : '#52525b' }}>
+                  {brainEnabled ? (isBrainActive ? 'Hybrid Brain Active' : 'Hybrid Brain ON') : 'Hybrid Brain OFF'}
+                </p>
+                {brainEnabled && isBrainActive && brainDecision && (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${
+                      brainDecision.action === 'BUY' ? 'bg-emerald-900/30 text-emerald-400'
+                      : brainDecision.action === 'SELL' ? 'bg-red-900/30 text-red-400'
+                      : 'bg-zinc-800 text-zinc-400'
+                    }`}>{brainDecision.action}</span>
+                    <span className="text-[8px] text-zinc-500">{brainDecision.confidence?.toFixed(0)}% conf</span>
+                    {brainDecision.survival?.fear > 0.3 && (
+                      <span className="text-[8px] text-amber-400">⚠ fear {(brainDecision.survival.fear * 100).toFixed(0)}%</span>
+                    )}
+                    <span className="text-[8px] text-purple-400/60">{brainDecision.psych?.regime}</span>
                   </div>
-                  {isBrainActive && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-violet-400 animate-ping" />
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[9px] font-bold" style={{ color: isBrainActive ? '#c4b5fd' : '#52525b' }}>
-                    {isBrainActive ? 'Hybrid Brain Active' : 'Brain Standby'}
-                  </p>
-                  {isBrainActive && brainDecision && (
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${
-                        brainDecision.action === 'BUY' ? 'bg-emerald-900/30 text-emerald-400'
-                        : brainDecision.action === 'SELL' ? 'bg-red-900/30 text-red-400'
-                        : 'bg-zinc-800 text-zinc-400'
-                      }`}>{brainDecision.action}</span>
-                      <span className="text-[8px] text-zinc-500">{brainDecision.confidence?.toFixed(0)}% conf</span>
-                      {brainDecision.survival?.fear > 0.3 && (
-                        <span className="text-[8px] text-amber-400">⚠ fear {(brainDecision.survival.fear * 100).toFixed(0)}%</span>
-                      )}
-                      <span className="text-[8px] text-purple-400/60">{brainDecision.psych?.regime}</span>
-                    </div>
-                  )}
-                </div>
-                {/* Manual fire button */}
+                )}
+                {!brainEnabled && (
+                  <p className="text-[8px] text-zinc-600 mt-0.5">Toggle to activate brain decisions</p>
+                )}
+              </div>
+
+              {/* ON/OFF Toggle Switch */}
+              <button
+                onClick={handleBrainToggle}
+                disabled={brainToggling}
+                data-testid="brain-toggle-btn"
+                className="relative flex-shrink-0 w-11 h-6 rounded-full transition-all duration-300 disabled:opacity-60 focus:outline-none"
+                style={{
+                  background: brainEnabled
+                    ? 'linear-gradient(135deg, #7c3aed, #6d28d9)'
+                    : 'rgba(63,63,70,0.6)',
+                  border: brainEnabled ? '1px solid rgba(139,92,246,0.5)' : '1px solid rgba(63,63,70,0.5)',
+                }}
+                title={brainEnabled ? 'Click to disable Hybrid Brain' : 'Click to enable Hybrid Brain'}
+              >
+                <span
+                  className="absolute top-0.5 transition-all duration-300 w-5 h-5 rounded-full shadow-md flex items-center justify-center text-[8px]"
+                  style={{
+                    left: brainEnabled ? 'calc(100% - 22px)' : '2px',
+                    background: brainEnabled ? '#fff' : 'rgba(113,113,122,0.8)',
+                  }}
+                >
+                  {brainToggling ? '⟳' : (brainEnabled ? '🧠' : '')}
+                </span>
+              </button>
+
+              {/* Manual fire ⚡ — only when enabled */}
+              {brainEnabled && (
                 <button
                   onClick={handleBrainDecide}
                   disabled={brainLoading}
@@ -747,8 +807,8 @@ export default function RoboAdvisorDashboard({ selectedStock, onSelectStock }) {
                 >
                   {brainLoading ? '⟳' : '⚡'}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Reset daily */}
             <button

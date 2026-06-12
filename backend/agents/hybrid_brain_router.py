@@ -128,6 +128,7 @@ async def state():
         "last_pnl_pct":     s.last_pnl_pct * 100,
         "grace_days":       s.grace_days,
         "config":           hybrid_brain.config,
+        "brain_enabled":    hybrid_brain.brain_enabled,
         "as_of":            datetime.now(timezone.utc).isoformat(),
     }
 
@@ -149,6 +150,20 @@ async def reset_daily():
     # Also clear cached decisions so next decide() uses fresh state
     hybrid_brain._decision_cache.clear()
     return await state()
+
+
+@router.post("/toggle")
+async def toggle_brain(body: dict = {}):
+    """Toggle Hybrid Brain ON or OFF. Accepts optional {'enabled': bool}."""
+    if "enabled" in body:
+        hybrid_brain.brain_enabled = bool(body["enabled"])
+    else:
+        hybrid_brain.brain_enabled = not hybrid_brain.brain_enabled
+    log.info(f"[HybridBrain] toggled → enabled={hybrid_brain.brain_enabled}")
+    return {
+        "brain_enabled": hybrid_brain.brain_enabled,
+        "message": f"Hybrid Brain {'ENABLED' if hybrid_brain.brain_enabled else 'DISABLED'}",
+    }
 
 
 @router.get("/audit")
